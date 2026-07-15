@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>関西エアウォッチ 3D</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+<style>
+  html, body, #cesiumContainer { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#000; }
+  #hud { position:absolute; top:10px; left:10px; z-index:10; background:rgba(10,30,50,.78); color:#dfeaff;
+         font:13px/1.5 -apple-system,"Hiragino Kaku Gothic ProN",sans-serif; padding:9px 12px; border-radius:10px; }
+  #hud b { color:#7fc4ff; }
+  #hud .cnt { font-size:18px; font-weight:800; color:#fff; }
+  #err { position:absolute; bottom:10px; left:10px; z-index:10; color:#ff9b9b; font:12px monospace; background:rgba(0,0,0,.6); padding:4px 8px; border-radius:6px; display:none; }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b><br><span class="cnt" id="cnt">–</span> 機 受信中<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="err"></div>
+<script>
+const SUPA = "https://iisatjsohjknjldpjslb.supabase.co";
+const KEY  = "sb_publishable_JeYLiw0skEB5v5byzQYhEQ_WHZ-I-zJ";
+const HDRS = { apikey: KEY, Authorization: "Bearer " + KEY };
+const FT2M = 0.3048;
+const showErr = m => { const e=document.getElementById('err'); e.style.display='block'; e.textContent=m; };
+
+// Ion不使用（トークン不要）。OSM画像＋楕円体地形で無料動作。
+Cesium.Ion.defaultAccessToken = "";
+const viewer = new Cesium.Viewer("cesiumContainer", {
+  baseLayer: false, baseLayerPicker:false, geocoder:false, homeButton:false,
+  sceneModePicker:false, navigationHelpButton:false, fullscreenButton:false,
+  animation:false, timeline:false, infoBox:true, selectionIndicator:true,
+  terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+});
+viewer.imageryLayers.addImageryProvider(
+  new Cesium.OpenStreetMapImageryProvider({ url: "https://a.tile.openstreetmap.org/" }));
+viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#0a1622");
+viewer.scene.skyAtmosphere.show = true;
+
+// 伊丹を南から斜めに見下ろす初期カメラ
+viewer.camera.setView({
+  destination: Cesium.Cartesian3.fromDegrees(135.44, 34.05, 42000),
+  orientation: { heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-28), roll: 0 },
+});
+
+// 空港マーカー
+const AIRPORTS = [["伊丹",34.7855,135.4382],["関西",34.4342,135.2330],["神戸",34.6328,135.2239]];
+for (const [nm,la,lo] of AIRPORTS) {
+  viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(lo, la, 0),
+    point: { pixelSize: 9, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 1,
+             disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    label: { text: nm, font: "13px sans-serif", pixelOffset: new Cesium.Cartesian2(0, 16),
+             fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth: 3,
+             outlineColor: Cesium.Color.fromCssColorString("#0a3d62"), disableDepthTestDistance: Number.POSITIVE_INFINITY },
+  });
+}
+
+// 高度→色（アプリと同配色: hue 20→250, 0..42000ft）
+function altColor(ft){
+  if (ft == null || ft < 0) return Cesium.Color.fromCssColorString("#96a0aa");
+  const h = Math.max(20, Math.min(250, 20 + (ft/42000)*230));
+  return Cesium.Color.fromHsl(h/360, 0.9, 0.5, 1.0);
+}
+
+const planes = {};   // hex -> {ent, line}
+function upsert(a){
+  const ftRaw = (a.alt_baro === "ground") ? 0 : a.alt_baro;
+  const ft = (typeof ftRaw === "number") ? ftRaw : null;
+  const alt_m = (ft ?? 0) * FT2M;
+  const pos = Cesium.Cartesian3.fromDegrees(a.lon, a.lat, Math.max(0, alt_m));
+  const col = altColor(ft);
+  const cs = (a.flight||"").trim() || a.hex;
+  const route = (a.origCity && a.destCity) ? `${a.origCity} → ${a.destCity}` : "";
+  const desc = `<table>
+    <tr><td>便名</td><td><b>${cs}</b></td></tr>
+    <tr><td>路線</td><td>${route||"–"}</td></tr>
+    <tr><td>高度</td><td>${ft!=null?ft.toLocaleString()+" ft":"–"}</td></tr>
+    <tr><td>速度</td><td>${a.gs!=null?Math.round(a.gs)+" kt":"–"}</td></tr>
+    <tr><td>機種</td><td>${a.t||a.desc||"–"}</td></tr></table>`;
+  let p = planes[a.hex];
+  if (!p){
+    const ent = viewer.entities.add({
+      position: pos,
+      point: { pixelSize: 11, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
+      label: { text: cs, font: "12px sans-serif", pixelOffset: new Cesium.Cartesian2(0,-16),
+               fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+               outlineWidth: 3, outlineColor: Cesium.Color.BLACK,
+               scaleByDistance: new Cesium.NearFarScalar(5e4, 1.0, 6e5, 0.4) },
+      description: desc,
+    });
+    // 高度を可視化する垂直の「落とし線」
+    const line = viewer.entities.add({
+      polyline: { positions: [pos, Cesium.Cartesian3.fromDegrees(a.lon, a.lat, 0)],
+                  width: 1, material: col.withAlpha(0.35) } });
+    planes[a.hex] = { ent, line };
+  } else {
+    p.ent.position = pos;
+    p.ent.point.color = col;
+    p.ent.label.text = cs;
+    p.ent.description = desc;
+    p.line.polyline.positions = [pos, Cesium.Cartesian3.fromDegrees(a.lon, a.lat, 0)];
+    p.line.polyline.material = col.withAlpha(0.35);
+  }
+  planes[a.hex]._seen = Date.now();
+}
+
+async function poll(){
+  try {
+    const r = await fetch(`${SUPA}/rest/v1/feed_snapshot?select=data&limit=1`, { headers: HDRS });
+    const j = await r.json();
+    const list = (j && j[0] && j[0].data && j[0].data.aircraft) || [];
+    let n = 0;
+    for (const a of list){ if (a.lat!=null && a.lon!=null){ upsert(a); n++; } }
+    // 消えた機体を除去
+    const now = Date.now();
+    for (const hex of Object.keys(planes)){
+      if (now - planes[hex]._seen > 30000){
+        viewer.entities.remove(planes[hex].ent); viewer.entities.remove(planes[hex].line); delete planes[hex];
+      }
+    }
+    document.getElementById('cnt').textContent = n;
+    document.getElementById('upd').textContent = new Date().toLocaleTimeString('ja-JP');
+    document.getElementById('err').style.display='none';
+  } catch(e){ showErr("取得エラー: " + (e && e.message || e)); }
+}
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>
