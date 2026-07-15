@@ -64,10 +64,22 @@ function altColor(ft){
   const h = Math.max(20, Math.min(250, 20 + (ft/42000)*230));
   return Cesium.Color.fromHsl(h/360, 0.9, 0.5, 1.0);
 }
-function planeBillboard(colorProp, rotationProp){
+function planeBillboard(colorProp){
   return { image: PLANE_SVG, width: 30, height: 30, color: colorProp,
-           rotation: rotationProp, disableDepthTestDistance: 0,
+           disableDepthTestDistance: 0,
            scaleByDistance: new Cesium.NearFarScalar(3e4, 1.1, 8e5, 0.45) };
+}
+// ADS-B送信のtrack(方位°)を、その地点のワールド空間の水平方向ベクトルへ変換。
+// これをbillboard.alignedAxisに使うと、機首=進行方向で安定（速度微分のプルプルを回避）。
+const _scratchM = new Cesium.Matrix4();
+function headingVec(lon, lat, trackDeg){
+  if (trackDeg == null || isNaN(trackDeg)) return undefined;
+  const pos = Cesium.Cartesian3.fromDegrees(lon, lat);
+  const enu = Cesium.Transforms.eastNorthUpToFixedFrame(pos, undefined, _scratchM);
+  const th = Cesium.Math.toRadians(trackDeg);
+  const local = new Cesium.Cartesian3(Math.sin(th), Math.cos(th), 0); // ENU: 東=sin,北=cos
+  const world = Cesium.Matrix4.multiplyByPointAsVector(enu, local, new Cesium.Cartesian3());
+  return Cesium.Cartesian3.normalize(world, world);
 }
 function labelGraphics(text){
   return { text, font:"12px sans-serif", pixelOffset:new Cesium.Cartesian2(0,-22),
@@ -93,7 +105,7 @@ function upsertLive(a){
   const ft = (a.alt_baro==="ground")?0:(typeof a.alt_baro==="number"?a.alt_baro:null);
   const pos = Cesium.Cartesian3.fromDegrees(a.lon, a.lat, Math.max(0,(ft??0)*FT2M));
   const col = altColor(ft);
-  const rot = Cesium.Math.toRadians(-(a.track||0));  // 機首=進行方向（真上=北）
+  const av = headingVec(a.lon, a.lat, a.track);   // 機首=送信track（ワールド方向・安定）
   const cs = (a.flight||"").trim() || a.hex;
   const route=(a.origCity&&a.destCity)?`${a.origCity} → ${a.destCity}`:"";
   const desc=`<table><tr><td>便名</td><td><b>${cs}</b></td></tr><tr><td>路線</td><td>${route||"–"}</td></tr>`+
@@ -101,11 +113,13 @@ function upsertLive(a){
     `<tr><td>速度</td><td>${a.gs!=null?Math.round(a.gs)+" kt":"–"}</td></tr><tr><td>機種</td><td>${a.t||a.desc||"–"}</td></tr></table>`;
   let p=planes[a.hex];
   if(!p){
-    const ent=viewer.entities.add({ position:pos, billboard:planeBillboard(col,rot), label:labelGraphics(cs), description:desc });
+    const ent=viewer.entities.add({ position:pos, billboard:planeBillboard(col), label:labelGraphics(cs), description:desc });
+    if(av) ent.billboard.alignedAxis=av;
     const line=viewer.entities.add({ polyline:{ positions:[pos,Cesium.Cartesian3.fromDegrees(a.lon,a.lat,0)], width:1, material:col.withAlpha(0.35) } });
     planes[a.hex]={ent,line};
   } else {
-    p.ent.position=pos; p.ent.billboard.color=col; p.ent.billboard.rotation=rot; p.ent.label.text=cs; p.ent.description=desc;
+    p.ent.position=pos; p.ent.billboard.color=col; p.ent.label.text=cs; p.ent.description=desc;
+    p.ent.billboard.alignedAxis = av || Cesium.Cartesian3.UNIT_Z;
     p.line.polyline.positions=[pos,Cesium.Cartesian3.fromDegrees(a.lon,a.lat,0)]; p.line.polyline.material=col.withAlpha(0.35);
   }
   planes[a.hex]._seen=Date.now();
@@ -153,6 +167,7 @@ async function setReplay(hoursBack){
   const t0=Cesium.JulianDate.fromDate(new Date(frames[0].t*1000));
   const t1=Cesium.JulianDate.fromDate(new Date(frames[frames.length-1].t*1000));
   const sampled={};   // hex -> SampledPositionProperty
+  const dirs={};      // hex -> SampledProperty(Cartesian3)  機首方向（trackから）
   const meta={};      // hex -> {flight, lastAlt, first, last, n}
   for(const f of frames){
     const jt=Cesium.JulianDate.fromDate(new Date(f.t*1000));
@@ -165,9 +180,14 @@ async function setReplay(hoursBack){
         // 受信区間の外では位置を持たない（＝凍結して溜まるのを防ぐ）
         sp.forwardExtrapolationType=Cesium.ExtrapolationType.NONE;
         sp.backwardExtrapolationType=Cesium.ExtrapolationType.NONE;
-        sampled[hex]=sp; meta[hex]={flight:(flight||'').trim()||hex, first:jt.clone(), n:0};
+        sampled[hex]=sp;
+        const dp=new Cesium.SampledProperty(Cesium.Cartesian3); // 方向は線形補間（ベクトルなので360°境界も安全）
+        dirs[hex]=dp;
+        meta[hex]={flight:(flight||'').trim()||hex, first:jt.clone(), n:0};
       }
       sampled[hex].addSample(jt, Cesium.Cartesian3.fromDegrees(lon,lat,Math.max(0,(alt===-1?0:alt)*FT2M)));
+      const hv=headingVec(lon,lat,track);
+      if(hv){ dirs[hex].addSample(jt, hv); meta[hex].dir=(meta[hex].dir||0)+1; }
       meta[hex].last=jt.clone(); meta[hex].lastAlt=(alt===-1?0:alt); meta[hex].n++;
     }
   }
@@ -177,13 +197,14 @@ async function setReplay(hoursBack){
     const col=altColor(m.lastAlt);
     const e=viewer.entities.add({
       position:sampled[hex],
-      billboard:planeBillboard(col, undefined),
+      billboard:planeBillboard(col),
       label:labelGraphics(m.flight),
       path:{ leadTime:0, trailTime:600, width:2, material:col.withAlpha(0.5), resolution:5 },
       // ★実際に受信していた区間だけ表示（区間外は非表示＝凍結機の蓄積を解消）
       availability:new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({start:m.first, stop:m.last})]),
     });
-    e.billboard.alignedAxis=new Cesium.VelocityVectorProperty(sampled[hex], true);
+    // 機首=送信track（安定）。track欠測の機体は既定の上向き
+    if(meta[hex].dir) e.billboard.alignedAxis=dirs[hex];
   }
   viewer.clock.startTime=t0.clone(); viewer.clock.stopTime=t1.clone();
   viewer.clock.currentTime=t0.clone(); viewer.clock.clockRange=Cesium.ClockRange.CLAMPED;
