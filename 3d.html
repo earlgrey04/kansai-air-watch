@@ -153,29 +153,36 @@ async function setReplay(hoursBack){
   const t0=Cesium.JulianDate.fromDate(new Date(frames[0].t*1000));
   const t1=Cesium.JulianDate.fromDate(new Date(frames[frames.length-1].t*1000));
   const sampled={};   // hex -> SampledPositionProperty
-  const meta={};      // hex -> {flight, lastAlt}
+  const meta={};      // hex -> {flight, lastAlt, first, last, n}
   for(const f of frames){
     const jt=Cesium.JulianDate.fromDate(new Date(f.t*1000));
     for(const x of f.a){
       const [hex,lat,lon,alt,track,gs,flight]=x;
       if(lat==null||lon==null) continue;
-      if(!sampled[hex]){ const sp=new Cesium.SampledPositionProperty(); sp.setInterpolationOptions({interpolationDegree:1,interpolationAlgorithm:Cesium.LinearApproximation}); sampled[hex]=sp; meta[hex]={flight:(flight||'').trim()||hex}; }
+      if(!sampled[hex]){
+        const sp=new Cesium.SampledPositionProperty();
+        sp.setInterpolationOptions({interpolationDegree:1,interpolationAlgorithm:Cesium.LinearApproximation});
+        // 受信区間の外では位置を持たない（＝凍結して溜まるのを防ぐ）
+        sp.forwardExtrapolationType=Cesium.ExtrapolationType.NONE;
+        sp.backwardExtrapolationType=Cesium.ExtrapolationType.NONE;
+        sampled[hex]=sp; meta[hex]={flight:(flight||'').trim()||hex, first:jt.clone(), n:0};
+      }
       sampled[hex].addSample(jt, Cesium.Cartesian3.fromDegrees(lon,lat,Math.max(0,(alt===-1?0:alt)*FT2M)));
-      meta[hex].lastAlt=(alt===-1?0:alt);
+      meta[hex].last=jt.clone(); meta[hex].lastAlt=(alt===-1?0:alt); meta[hex].n++;
     }
   }
   for(const hex of Object.keys(sampled)){
-    const col=altColor(meta[hex].lastAlt);
-    viewer.entities.add({
+    const m=meta[hex];
+    if(m.n<2) continue;   // 1点だけの機体は軌跡にならないので除外
+    const col=altColor(m.lastAlt);
+    const e=viewer.entities.add({
       position:sampled[hex],
       billboard:planeBillboard(col, undefined),
-      // 進行方向へ機首を向ける（速度ベクトルで自動整列）
-      // alignedAxis: 速度方向。billboardの上方向がこの向きに揃う
-      label:labelGraphics(meta[hex].flight),
+      label:labelGraphics(m.flight),
       path:{ leadTime:0, trailTime:600, width:2, material:col.withAlpha(0.5), resolution:5 },
-      availability:new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({start:t0,stop:t1})]),
+      // ★実際に受信していた区間だけ表示（区間外は非表示＝凍結機の蓄積を解消）
+      availability:new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({start:m.first, stop:m.last})]),
     });
-    const e=viewer.entities.values[viewer.entities.values.length-1];
     e.billboard.alignedAxis=new Cesium.VelocityVectorProperty(sampled[hex], true);
   }
   viewer.clock.startTime=t0.clone(); viewer.clock.stopTime=t1.clone();
