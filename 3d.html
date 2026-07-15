@@ -6,128 +6,187 @@
 <title>関西エアウォッチ 3D</title>
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Cesium.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <style>
   html, body, #cesiumContainer { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#000; }
-  #hud { position:absolute; top:10px; left:10px; z-index:10; background:rgba(10,30,50,.78); color:#dfeaff;
-         font:13px/1.5 -apple-system,"Hiragino Kaku Gothic ProN",sans-serif; padding:9px 12px; border-radius:10px; }
-  #hud b { color:#7fc4ff; }
-  #hud .cnt { font-size:18px; font-weight:800; color:#fff; }
-  #err { position:absolute; bottom:10px; left:10px; z-index:10; color:#ff9b9b; font:12px monospace; background:rgba(0,0,0,.6); padding:4px 8px; border-radius:6px; display:none; }
+  #hud { position:absolute; top:10px; left:10px; z-index:10; background:rgba(10,30,50,.8); color:#dfeaff;
+         font:13px/1.5 -apple-system,"Hiragino Kaku Gothic ProN",sans-serif; padding:9px 12px; border-radius:10px; max-width:70vw; }
+  #hud b { color:#7fc4ff; } #hud .cnt { font-size:18px; font-weight:800; color:#fff; }
+  #bar { position:absolute; top:10px; right:10px; z-index:10; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  #bar button { font:13px sans-serif; padding:7px 11px; border:none; border-radius:8px; background:rgba(20,40,64,.85); color:#cfe0f5; }
+  #bar button.on { background:#2563eb; color:#fff; font-weight:700; }
+  #err { position:absolute; bottom:34px; left:10px; z-index:10; color:#ff9b9b; font:12px monospace; background:rgba(0,0,0,.6); padding:4px 8px; border-radius:6px; display:none; }
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b><br><span class="cnt" id="cnt">–</span> 機 受信中<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="bar">
+  <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
+  <button onclick="setReplay(1)">🕑 1時間</button>
+  <button onclick="setReplay(3)">🕒 3時間</button>
+  <button onclick="setReplay(6)">🕕 6時間</button>
+</div>
 <div id="err"></div>
 <script>
 const SUPA = "https://iisatjsohjknjldpjslb.supabase.co";
 const KEY  = "sb_publishable_JeYLiw0skEB5v5byzQYhEQ_WHZ-I-zJ";
 const HDRS = { apikey: KEY, Authorization: "Bearer " + KEY };
 const FT2M = 0.3048;
-const showErr = m => { const e=document.getElementById('err'); e.style.display='block'; e.textContent=m; };
+const setErr = m => { const e=document.getElementById('err'); if(!m){e.style.display='none';return;} e.style.display='block'; e.textContent=m; };
+const setModeLbl = (t,cls)=>{ document.getElementById('mode').textContent=t; };
 
-// Ion不使用（トークン不要）。OSM画像＋楕円体地形で無料動作。
 Cesium.Ion.defaultAccessToken = "";
 const viewer = new Cesium.Viewer("cesiumContainer", {
-  baseLayer: false, baseLayerPicker:false, geocoder:false, homeButton:false,
+  baseLayer:false, baseLayerPicker:false, geocoder:false, homeButton:false,
   sceneModePicker:false, navigationHelpButton:false, fullscreenButton:false,
-  animation:false, timeline:false, infoBox:true, selectionIndicator:true,
+  animation:true, timeline:true, infoBox:true, selectionIndicator:true,
   terrainProvider: new Cesium.EllipsoidTerrainProvider(),
 });
 viewer.imageryLayers.addImageryProvider(
   new Cesium.OpenStreetMapImageryProvider({ url: "https://a.tile.openstreetmap.org/" }));
 viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#0a1622");
-viewer.scene.skyAtmosphere.show = true;
 
-// 伊丹を南から斜めに見下ろす初期カメラ
 viewer.camera.setView({
-  destination: Cesium.Cartesian3.fromDegrees(135.44, 34.05, 42000),
-  orientation: { heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-28), roll: 0 },
+  destination: Cesium.Cartesian3.fromDegrees(135.44, 34.02, 46000),
+  orientation: { heading:0, pitch: Cesium.Math.toRadians(-27), roll:0 },
 });
 
-// 空港マーカー
-const AIRPORTS = [["伊丹",34.7855,135.4382],["関西",34.4342,135.2330],["神戸",34.6328,135.2239]];
-for (const [nm,la,lo] of AIRPORTS) {
-  viewer.entities.add({
-    position: Cesium.Cartesian3.fromDegrees(lo, la, 0),
-    point: { pixelSize: 9, color: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 1,
-             disableDepthTestDistance: Number.POSITIVE_INFINITY },
-    label: { text: nm, font: "13px sans-serif", pixelOffset: new Cesium.Cartesian2(0, 16),
-             fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth: 3,
-             outlineColor: Cesium.Color.fromCssColorString("#0a3d62"), disableDepthTestDistance: Number.POSITIVE_INFINITY },
-  });
-}
+// 飛行機シルエット（機首=上向き）。白塗りにして billboard.color で高度色に着色。
+const PLANE_SVG = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
+  '<path d="M12 1.5c-.8 0-1.3 1.1-1.3 2.6v4.2L2 13.2v1.9l8.7-2.6v4.8l-2.2 1.6v1.4L12 20.7l3.5.6v-1.4l-2.2-1.6v-4.8l8.7 2.6v-1.9l-8.7-4.9V4.1c0-1.5-.5-2.6-1.3-2.6z" ' +
+  'fill="white" stroke="black" stroke-width="0.5"/></svg>');
 
-// 高度→色（アプリと同配色: hue 20→250, 0..42000ft）
 function altColor(ft){
   if (ft == null || ft < 0) return Cesium.Color.fromCssColorString("#96a0aa");
   const h = Math.max(20, Math.min(250, 20 + (ft/42000)*230));
   return Cesium.Color.fromHsl(h/360, 0.9, 0.5, 1.0);
 }
-
-const planes = {};   // hex -> {ent, line}
-function upsert(a){
-  const ftRaw = (a.alt_baro === "ground") ? 0 : a.alt_baro;
-  const ft = (typeof ftRaw === "number") ? ftRaw : null;
-  const alt_m = (ft ?? 0) * FT2M;
-  const pos = Cesium.Cartesian3.fromDegrees(a.lon, a.lat, Math.max(0, alt_m));
-  const col = altColor(ft);
-  const cs = (a.flight||"").trim() || a.hex;
-  const route = (a.origCity && a.destCity) ? `${a.origCity} → ${a.destCity}` : "";
-  const desc = `<table>
-    <tr><td>便名</td><td><b>${cs}</b></td></tr>
-    <tr><td>路線</td><td>${route||"–"}</td></tr>
-    <tr><td>高度</td><td>${ft!=null?ft.toLocaleString()+" ft":"–"}</td></tr>
-    <tr><td>速度</td><td>${a.gs!=null?Math.round(a.gs)+" kt":"–"}</td></tr>
-    <tr><td>機種</td><td>${a.t||a.desc||"–"}</td></tr></table>`;
-  let p = planes[a.hex];
-  if (!p){
-    const ent = viewer.entities.add({
-      position: pos,
-      point: { pixelSize: 11, color: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
-      label: { text: cs, font: "12px sans-serif", pixelOffset: new Cesium.Cartesian2(0,-16),
-               fillColor: Cesium.Color.WHITE, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-               outlineWidth: 3, outlineColor: Cesium.Color.BLACK,
-               scaleByDistance: new Cesium.NearFarScalar(5e4, 1.0, 6e5, 0.4) },
-      description: desc,
-    });
-    // 高度を可視化する垂直の「落とし線」
-    const line = viewer.entities.add({
-      polyline: { positions: [pos, Cesium.Cartesian3.fromDegrees(a.lon, a.lat, 0)],
-                  width: 1, material: col.withAlpha(0.35) } });
-    planes[a.hex] = { ent, line };
-  } else {
-    p.ent.position = pos;
-    p.ent.point.color = col;
-    p.ent.label.text = cs;
-    p.ent.description = desc;
-    p.line.polyline.positions = [pos, Cesium.Cartesian3.fromDegrees(a.lon, a.lat, 0)];
-    p.line.polyline.material = col.withAlpha(0.35);
+function planeBillboard(colorProp, rotationProp){
+  return { image: PLANE_SVG, width: 30, height: 30, color: colorProp,
+           rotation: rotationProp, disableDepthTestDistance: 0,
+           scaleByDistance: new Cesium.NearFarScalar(3e4, 1.1, 8e5, 0.45) };
+}
+function labelGraphics(text){
+  return { text, font:"12px sans-serif", pixelOffset:new Cesium.Cartesian2(0,-22),
+           fillColor:Cesium.Color.WHITE, style:Cesium.LabelStyle.FILL_AND_OUTLINE,
+           outlineWidth:3, outlineColor:Cesium.Color.BLACK,
+           scaleByDistance:new Cesium.NearFarScalar(5e4,1,6e5,0.4) };
+}
+function addAirports(){
+  for (const [nm,la,lo] of [["伊丹",34.7855,135.4382],["関西",34.4342,135.2330],["神戸",34.6328,135.2239]]){
+    viewer.entities.add({ id:"ap_"+nm, position:Cesium.Cartesian3.fromDegrees(lo,la,0),
+      point:{ pixelSize:9, color:Cesium.Color.WHITE, outlineColor:Cesium.Color.BLACK, outlineWidth:1,
+              disableDepthTestDistance:Number.POSITIVE_INFINITY },
+      label:{ text:nm, font:"13px sans-serif", pixelOffset:new Cesium.Cartesian2(0,16),
+              fillColor:Cesium.Color.WHITE, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3,
+              outlineColor:Cesium.Color.fromCssColorString("#0a3d62"), disableDepthTestDistance:Number.POSITIVE_INFINITY } });
   }
-  planes[a.hex]._seen = Date.now();
+}
+function clearAll(){ viewer.entities.removeAll(); addAirports(); }
+
+// ===== LIVE =====
+let liveTimer=null, planes={};
+function upsertLive(a){
+  const ft = (a.alt_baro==="ground")?0:(typeof a.alt_baro==="number"?a.alt_baro:null);
+  const pos = Cesium.Cartesian3.fromDegrees(a.lon, a.lat, Math.max(0,(ft??0)*FT2M));
+  const col = altColor(ft);
+  const rot = Cesium.Math.toRadians(-(a.track||0));  // 機首=進行方向（真上=北）
+  const cs = (a.flight||"").trim() || a.hex;
+  const route=(a.origCity&&a.destCity)?`${a.origCity} → ${a.destCity}`:"";
+  const desc=`<table><tr><td>便名</td><td><b>${cs}</b></td></tr><tr><td>路線</td><td>${route||"–"}</td></tr>`+
+    `<tr><td>高度</td><td>${ft!=null?ft.toLocaleString()+" ft":"–"}</td></tr>`+
+    `<tr><td>速度</td><td>${a.gs!=null?Math.round(a.gs)+" kt":"–"}</td></tr><tr><td>機種</td><td>${a.t||a.desc||"–"}</td></tr></table>`;
+  let p=planes[a.hex];
+  if(!p){
+    const ent=viewer.entities.add({ position:pos, billboard:planeBillboard(col,rot), label:labelGraphics(cs), description:desc });
+    const line=viewer.entities.add({ polyline:{ positions:[pos,Cesium.Cartesian3.fromDegrees(a.lon,a.lat,0)], width:1, material:col.withAlpha(0.35) } });
+    planes[a.hex]={ent,line};
+  } else {
+    p.ent.position=pos; p.ent.billboard.color=col; p.ent.billboard.rotation=rot; p.ent.label.text=cs; p.ent.description=desc;
+    p.line.polyline.positions=[pos,Cesium.Cartesian3.fromDegrees(a.lon,a.lat,0)]; p.line.polyline.material=col.withAlpha(0.35);
+  }
+  planes[a.hex]._seen=Date.now();
+}
+async function pollLive(){
+  try{
+    const r=await fetch(`${SUPA}/rest/v1/feed_snapshot?select=data&limit=1`,{headers:HDRS});
+    const j=await r.json();
+    const list=(j&&j[0]&&j[0].data&&j[0].data.aircraft)||[];
+    let n=0; for(const a of list){ if(a.lat!=null&&a.lon!=null){ upsertLive(a); n++; } }
+    const now=Date.now();
+    for(const hex of Object.keys(planes)){ if(now-planes[hex]._seen>30000){ viewer.entities.remove(planes[hex].ent); viewer.entities.remove(planes[hex].line); delete planes[hex]; } }
+    document.getElementById('cnt').textContent=n; document.getElementById('upd').textContent=new Date().toLocaleTimeString('ja-JP'); setErr(null);
+  }catch(e){ setErr("取得エラー: "+(e&&e.message||e)); }
+}
+function setLive(){
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  document.getElementById('bLive').classList.add('on'); setModeLbl("LIVE");
+  viewer.clock.shouldAnimate=false;
+  clearAll(); planes={};
+  pollLive(); if(liveTimer)clearInterval(liveTimer); liveTimer=setInterval(pollLive,2000);
 }
 
-async function poll(){
-  try {
-    const r = await fetch(`${SUPA}/rest/v1/feed_snapshot?select=data&limit=1`, { headers: HDRS });
-    const j = await r.json();
-    const list = (j && j[0] && j[0].data && j[0].data.aircraft) || [];
-    let n = 0;
-    for (const a of list){ if (a.lat!=null && a.lon!=null){ upsert(a); n++; } }
-    // 消えた機体を除去
-    const now = Date.now();
-    for (const hex of Object.keys(planes)){
-      if (now - planes[hex]._seen > 30000){
-        viewer.entities.remove(planes[hex].ent); viewer.entities.remove(planes[hex].line); delete planes[hex];
-      }
-    }
-    document.getElementById('cnt').textContent = n;
-    document.getElementById('upd').textContent = new Date().toLocaleTimeString('ja-JP');
-    document.getElementById('err').style.display='none';
-  } catch(e){ showErr("取得エラー: " + (e && e.message || e)); }
+// ===== REPLAY =====
+async function loadFrames(hoursBack){
+  const now=Date.now(), frames=[], p2=n=>String(n).padStart(2,'0');
+  for(let h=hoursBack;h>=0;h--){
+    const d=new Date(now-h*3600e3);
+    const path=`${d.getUTCFullYear()}/${p2(d.getUTCMonth()+1)}/${p2(d.getUTCDate())}/${p2(d.getUTCHours())}`;
+    try{
+      const buf=await (await fetch(`${SUPA}/storage/v1/object/public/history/${path}.jsonl.gz`)).arrayBuffer();
+      let text=pako.inflate(new Uint8Array(buf),{to:'string'});
+      for(const line of text.split('\n')){ if(line.trim()) frames.push(JSON.parse(line)); }
+    }catch(e){}
+  }
+  frames.sort((a,b)=>a.t-b.t); return frames;
 }
-poll();
-setInterval(poll, 2000);
+async function setReplay(hoursBack){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  event.target.classList.add('on'); setModeLbl("REPLAY "+hoursBack+"h");
+  setErr("履歴を読み込み中…"); clearAll();
+  const frames=await loadFrames(hoursBack);
+  if(!frames.length){ setErr("この期間の記録がありません"); return; }
+  const t0=Cesium.JulianDate.fromDate(new Date(frames[0].t*1000));
+  const t1=Cesium.JulianDate.fromDate(new Date(frames[frames.length-1].t*1000));
+  const sampled={};   // hex -> SampledPositionProperty
+  const meta={};      // hex -> {flight, lastAlt}
+  for(const f of frames){
+    const jt=Cesium.JulianDate.fromDate(new Date(f.t*1000));
+    for(const x of f.a){
+      const [hex,lat,lon,alt,track,gs,flight]=x;
+      if(lat==null||lon==null) continue;
+      if(!sampled[hex]){ const sp=new Cesium.SampledPositionProperty(); sp.setInterpolationOptions({interpolationDegree:1,interpolationAlgorithm:Cesium.LinearApproximation}); sampled[hex]=sp; meta[hex]={flight:(flight||'').trim()||hex}; }
+      sampled[hex].addSample(jt, Cesium.Cartesian3.fromDegrees(lon,lat,Math.max(0,(alt===-1?0:alt)*FT2M)));
+      meta[hex].lastAlt=(alt===-1?0:alt);
+    }
+  }
+  for(const hex of Object.keys(sampled)){
+    const col=altColor(meta[hex].lastAlt);
+    viewer.entities.add({
+      position:sampled[hex],
+      billboard:planeBillboard(col, undefined),
+      // 進行方向へ機首を向ける（速度ベクトルで自動整列）
+      // alignedAxis: 速度方向。billboardの上方向がこの向きに揃う
+      label:labelGraphics(meta[hex].flight),
+      path:{ leadTime:0, trailTime:600, width:2, material:col.withAlpha(0.5), resolution:5 },
+      availability:new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({start:t0,stop:t1})]),
+    });
+    const e=viewer.entities.values[viewer.entities.values.length-1];
+    e.billboard.alignedAxis=new Cesium.VelocityVectorProperty(sampled[hex], true);
+  }
+  viewer.clock.startTime=t0.clone(); viewer.clock.stopTime=t1.clone();
+  viewer.clock.currentTime=t0.clone(); viewer.clock.clockRange=Cesium.ClockRange.CLAMPED;
+  viewer.clock.multiplier=60; viewer.clock.shouldAnimate=true;
+  viewer.timeline.zoomTo(t0,t1);
+  document.getElementById('cnt').textContent=Object.keys(sampled).length;
+  document.getElementById('upd').textContent="タイムラインをドラッグで移動 / ▶で再生";
+  setErr(null);
+}
+
+setLive();
 </script>
 </body>
 </html>
