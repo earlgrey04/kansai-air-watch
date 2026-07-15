@@ -57,7 +57,6 @@ function altColor(ft){
   const h = Math.max(20, Math.min(250, 20 + (ft/42000)*230));
   return Cesium.Color.fromHsl(h/360, 0.9, 0.5, 1.0);
 }
-// 本物の3D飛行機モデル。VelocityOrientationで機首=進行方向（視線平行でも震えない）。
 function planeModel(colorProp){
   return { uri:MODEL_URL, minimumPixelSize:44, maximumScale:14000, scale:1.0,
            color:colorProp, colorBlendMode:Cesium.ColorBlendMode.MIX, colorBlendAmount:0.6 };
@@ -65,10 +64,34 @@ function planeModel(colorProp){
 function labelGraphics(text){
   return { text, font:"12px sans-serif", pixelOffset:new Cesium.Cartesian2(0,-24),
            fillColor:Cesium.Color.WHITE, style:Cesium.LabelStyle.FILL_AND_OUTLINE,
-           outlineWidth:3, outlineColor:Cesium.Color.BLACK,
-           scaleByDistance:new Cesium.NearFarScalar(5e4,1,6e5,0.4) };
+           outlineWidth:3, outlineColor:Cesium.Color.BLACK, scaleByDistance:new Cesium.NearFarScalar(5e4,1,6e5,0.4) };
 }
 function groundOf(pos){ const c=Cesium.Cartographic.fromCartesian(pos); return Cesium.Cartesian3.fromRadians(c.longitude,c.latitude,0); }
+
+// track(方位°)→ワールド方向ベクトル（その地点の東西南北から）
+const _m4=new Cesium.Matrix4();
+function headingVec(lon, lat, trackDeg){
+  if (trackDeg==null||isNaN(trackDeg)) return undefined;
+  const p=Cesium.Cartesian3.fromDegrees(lon,lat);
+  const enu=Cesium.Transforms.eastNorthUpToFixedFrame(p,undefined,_m4);
+  const th=Cesium.Math.toRadians(trackDeg);
+  const local=new Cesium.Cartesian3(Math.sin(th),Math.cos(th),0); // 東=sin,北=cos
+  const w=Cesium.Matrix4.multiplyByPointAsVector(enu,local,new Cesium.Cartesian3());
+  return Cesium.Cartesian3.normalize(w,w);
+}
+// 位置と前方ベクトルから、3Dモデルの向き(クォータニオン)を直接構築（速度差分に頼らない＝震えない）
+function modelOrientation(pos, fwd){
+  if(!fwd) return undefined;
+  const up=Cesium.Cartesian3.normalize(pos,new Cesium.Cartesian3());
+  const x=Cesium.Cartesian3.normalize(fwd,new Cesium.Cartesian3());        // 前(+X=機首)
+  const y=Cesium.Cartesian3.cross(up,x,new Cesium.Cartesian3());
+  if(Cesium.Cartesian3.magnitude(y)<1e-7) return undefined;
+  Cesium.Cartesian3.normalize(y,y);
+  const z=Cesium.Cartesian3.cross(x,y,new Cesium.Cartesian3());            // 上(+Z)
+  const rot=new Cesium.Matrix3(x.x,y.x,z.x, x.y,y.y,z.y, x.z,y.z,z.z);
+  return Cesium.Quaternion.fromRotationMatrix(rot);
+}
+
 function addAirports(){
   for (const [nm,la,lo] of [["伊丹",34.7855,135.4382],["関西",34.4342,135.2330],["神戸",34.6328,135.2239]]){
     viewer.entities.add({ id:"ap_"+nm, position:Cesium.Cartesian3.fromDegrees(lo,la,0),
@@ -80,30 +103,25 @@ function addAirports(){
 }
 function clearAll(){ viewer.entities.removeAll(); addAirports(); }
 
-// ===== LIVE =====
+// ===== LIVE =====（位置=最新の定数、向き=trackから直接。差分なし）
 let liveTimer=null, planes={};
 function upsertLive(a){
   const ft=(a.alt_baro==="ground")?0:(typeof a.alt_baro==="number"?a.alt_baro:null);
   const pos=Cesium.Cartesian3.fromDegrees(a.lon,a.lat,Math.max(0,(ft??0)*FT2M));
   const col=altColor(ft); const cs=(a.flight||"").trim()||a.hex;
+  const ori=modelOrientation(pos, headingVec(a.lon,a.lat,a.track));
   const route=(a.origCity&&a.destCity)?`${a.origCity} → ${a.destCity}`:"";
   const desc=`<table><tr><td>便名</td><td><b>${cs}</b></td></tr><tr><td>路線</td><td>${route||"–"}</td></tr>`+
     `<tr><td>高度</td><td>${ft!=null?ft.toLocaleString()+" ft":"–"}</td></tr>`+
     `<tr><td>速度</td><td>${a.gs!=null?Math.round(a.gs)+" kt":"–"}</td></tr><tr><td>機種</td><td>${a.t||a.desc||"–"}</td></tr></table>`;
-  const nowJt=Cesium.JulianDate.now();
   let p=planes[a.hex];
   if(!p){
-    const sp=new Cesium.SampledPositionProperty();
-    sp.forwardExtrapolationType=Cesium.ExtrapolationType.HOLD; sp.backwardExtrapolationType=Cesium.ExtrapolationType.HOLD;
-    sp.addSample(nowJt,pos);
-    const ent=viewer.entities.add({ position:sp, model:planeModel(col),
-      orientation:new Cesium.VelocityOrientationProperty(sp), label:labelGraphics(cs), description:desc });
-    const line=viewer.entities.add({ polyline:{ width:1, material:col.withAlpha(0.35),
-      positions:new Cesium.CallbackProperty(()=>{ const pp=sp.getValue(viewer.clock.currentTime); return pp?[pp,groundOf(pp)]:[]; },false) } });
-    planes[a.hex]={ent,line,sp};
+    const ent=viewer.entities.add({ position:pos, model:planeModel(col), orientation:ori, label:labelGraphics(cs), description:desc });
+    const line=viewer.entities.add({ polyline:{ positions:[pos,groundOf(pos)], width:1, material:col.withAlpha(0.35) } });
+    planes[a.hex]={ent,line};
   } else {
-    p.sp.addSample(nowJt,pos); p.ent.model.color=col; p.ent.label.text=cs; p.ent.description=desc;
-    p.line.polyline.material=col.withAlpha(0.35);
+    p.ent.position=pos; if(ori) p.ent.orientation=ori; p.ent.model.color=col; p.ent.label.text=cs; p.ent.description=desc;
+    p.line.polyline.positions=[pos,groundOf(pos)]; p.line.polyline.material=col.withAlpha(0.35);
   }
   planes[a.hex]._seen=Date.now();
 }
@@ -113,7 +131,6 @@ async function pollLive(){
     const j=await r.json();
     const list=(j&&j[0]&&j[0].data&&j[0].data.aircraft)||[];
     let n=0; for(const a of list){ if(a.lat!=null&&a.lon!=null){ upsertLive(a); n++; } }
-    viewer.clock.currentTime=Cesium.JulianDate.now();  // 最新サンプル時刻で評価
     const now=Date.now();
     for(const hex of Object.keys(planes)){ if(now-planes[hex]._seen>30000){ viewer.entities.remove(planes[hex].ent); viewer.entities.remove(planes[hex].line); delete planes[hex]; } }
     document.getElementById('cnt').textContent=n; document.getElementById('upd').textContent=new Date().toLocaleTimeString('ja-JP'); setErr(null);
@@ -122,13 +139,18 @@ async function pollLive(){
 function setLive(){
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
   document.getElementById('bLive').classList.add('on'); setModeLbl("LIVE");
-  viewer.clock.shouldAnimate=false; viewer.clock.clockRange=Cesium.ClockRange.UNBOUNDED;
-  viewer.clock.currentTime=Cesium.JulianDate.now();
+  viewer.clock.shouldAnimate=false;
   clearAll(); planes={};
   pollLive(); if(liveTimer)clearInterval(liveTimer); liveTimer=setInterval(pollLive,2000);
 }
 
-// ===== REPLAY =====
+// ===== REPLAY =====（位置=補間、向き=各時刻のtrackから直接構築）
+function trackAt(arr, jt){
+  const s=Cesium.JulianDate.toDate(jt).getTime()/1000;
+  let lo=0,hi=arr.length-1,ans=arr.length?arr[0][1]:null;
+  while(lo<=hi){ const mid=(lo+hi)>>1; if(arr[mid][0]<=s){ ans=arr[mid][1]; lo=mid+1; } else hi=mid-1; }
+  return ans;
+}
 async function loadFrames(hoursBack){
   const now=Date.now(), frames=[], p2=n=>String(n).padStart(2,'0');
   for(let h=hoursBack;h>=0;h--){
@@ -151,7 +173,7 @@ async function setReplay(hoursBack){
   if(!frames.length){ setErr("この期間の記録がありません"); return; }
   const t0=Cesium.JulianDate.fromDate(new Date(frames[0].t*1000));
   const t1=Cesium.JulianDate.fromDate(new Date(frames[frames.length-1].t*1000));
-  const sampled={}, meta={};
+  const sampled={}, meta={}, trk={};
   for(const f of frames){
     const jt=Cesium.JulianDate.fromDate(new Date(f.t*1000));
     for(const x of f.a){
@@ -161,18 +183,27 @@ async function setReplay(hoursBack){
         const sp=new Cesium.SampledPositionProperty();
         sp.setInterpolationOptions({interpolationDegree:1,interpolationAlgorithm:Cesium.LinearApproximation});
         sp.forwardExtrapolationType=Cesium.ExtrapolationType.NONE; sp.backwardExtrapolationType=Cesium.ExtrapolationType.NONE;
-        sampled[hex]=sp; meta[hex]={flight:(flight||'').trim()||hex, first:jt.clone(), n:0};
+        sampled[hex]=sp; trk[hex]=[]; meta[hex]={flight:(flight||'').trim()||hex, first:jt.clone(), n:0, lastT:null};
       }
+      if(meta[hex].lastT===f.t) continue;   // 同一時刻の重複を除去（位置ブレ防止）
+      meta[hex].lastT=f.t;
       sampled[hex].addSample(jt, Cesium.Cartesian3.fromDegrees(lon,lat,Math.max(0,(alt===-1?0:alt)*FT2M)));
+      if(track!=null) trk[hex].push([f.t,track]);
       meta[hex].last=jt.clone(); meta[hex].lastAlt=(alt===-1?0:alt); meta[hex].n++;
     }
   }
   for(const hex of Object.keys(sampled)){
     const m=meta[hex]; if(m.n<2) continue;
-    const col=altColor(m.lastAlt);
+    const col=altColor(m.lastAlt); const sp=sampled[hex]; const tarr=trk[hex];
+    // 向き：各時刻の位置とtrack(step参照)から直接構築（速度差分を使わない＝震えない）
+    const ori = tarr.length
+      ? new Cesium.CallbackProperty((time)=>{ const pp=sp.getValue(time); if(!pp) return undefined;
+          const c=Cesium.Cartographic.fromCartesian(pp);
+          const fwd=headingVec(Cesium.Math.toDegrees(c.longitude),Cesium.Math.toDegrees(c.latitude),trackAt(tarr,time));
+          return modelOrientation(pp,fwd); }, false)
+      : new Cesium.VelocityOrientationProperty(sp);
     viewer.entities.add({
-      position:sampled[hex], model:planeModel(col), label:labelGraphics(m.flight),
-      orientation:new Cesium.VelocityOrientationProperty(sampled[hex]),  // 機首=進行方向（3Dモデル・震えない）
+      position:sp, model:planeModel(col), label:labelGraphics(m.flight), orientation:ori,
       path:{ leadTime:0, trailTime:600, width:2, material:col.withAlpha(0.5), resolution:5 },
       availability:new Cesium.TimeIntervalCollection([new Cesium.TimeInterval({start:m.first, stop:m.last})]),
     });
