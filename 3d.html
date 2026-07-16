@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v10-light</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v11-voyager</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -44,12 +44,12 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   animation:true, timeline:true, infoBox:true, selectionIndicator:true,
   terrainProvider: new Cesium.EllipsoidTerrainProvider(),
 });
-// 明るいミニマル地図（Positron/薄グレー）＝明るいが色は控えめ→機体がしっかり際立つ
+// Voyager地図（明るい＋ほどよく色あり：陸=クリーム/水=淡青/緑地=淡緑）
 viewer.imageryLayers.addImageryProvider(
   new Cesium.UrlTemplateImageryProvider({
-    url: "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    url: "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
     credit: "© CARTO © OpenStreetMap contributors", maximumLevel: 19 }));
-viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#d7dde1");
+viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#cfe1ef");
 viewer.camera.setView({
   destination: Cesium.Cartesian3.fromDegrees(135.44, 34.02, 46000),
   orientation: { heading:0, pitch: Cesium.Math.toRadians(-27), roll:0 },
@@ -63,7 +63,9 @@ function altColor(ft){
 }
 function planeModel(colorProp){
   return { uri:MODEL_URL, minimumPixelSize:44, maximumScale:14000, scale:1.0,
-           color:colorProp, colorBlendMode:Cesium.ColorBlendMode.MIX, colorBlendAmount:0.6 };
+           color:colorProp, colorBlendMode:Cesium.ColorBlendMode.MIX, colorBlendAmount:0.6,
+           // 濃紺の縁取り＝どんな地図色の上でも機体がくっきり浮く
+           silhouetteColor:Cesium.Color.fromCssColorString("#0b1a2b"), silhouetteSize:1.6 };
 }
 function labelGraphics(text){
   return { text, font:"12px sans-serif", pixelOffset:new Cesium.Cartesian2(0,-24),
