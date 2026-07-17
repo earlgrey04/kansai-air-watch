@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v11-voyager</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v12-terrain</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -38,12 +38,41 @@ const setErr = m => { const e=document.getElementById('err'); if(!m){e.style.dis
 const setModeLbl = t => { document.getElementById('mode').textContent=t; };
 
 Cesium.Ion.defaultAccessToken = "";
+
+// 国土地理院DEM(標高PNGタイル)を解読して3D地形にする（トークン不要・日本を高精細カバー）
+function gsiTerrain(){
+  const TSZ=256, MAXZ=14, N=64;
+  const dec=(r,g,b)=>{ if(r===128&&g===0&&b===0) return 0; const u=r*65536+g*256+b; return u<8388608 ? u*0.01 : (u-16777216)*0.01; };
+  return new Cesium.CustomHeightmapTerrainProvider({
+    width:N, height:N, tilingScheme:new Cesium.WebMercatorTilingScheme(),
+    callback:(x,y,level)=>{
+      if(level>MAXZ) return undefined;
+      return new Promise((resolve)=>{
+        const img=new Image(); img.crossOrigin="anonymous";
+        img.onload=()=>{ try{
+          const cv=document.createElement("canvas"); cv.width=TSZ; cv.height=TSZ;
+          const ctx=cv.getContext("2d",{willReadFrequently:true}); ctx.drawImage(img,0,0,TSZ,TSZ);
+          const d=ctx.getImageData(0,0,TSZ,TSZ).data; const out=new Float32Array(N*N);
+          for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+            const px=Math.round(i/(N-1)*(TSZ-1)), py=Math.round(j/(N-1)*(TSZ-1)); const o=(py*TSZ+px)*4;
+            out[j*N+i]=dec(d[o],d[o+1],d[o+2]);
+          }
+          resolve(out);
+        }catch(e){ resolve(undefined); } };
+        img.onerror=()=>resolve(undefined);
+        img.src=`https://cyberjapandata.gsi.go.jp/xyz/dem_png/${level}/${x}/${y}.png`;
+      });
+    }
+  });
+}
+
 const viewer = new Cesium.Viewer("cesiumContainer", {
   baseLayer:false, baseLayerPicker:false, geocoder:false, homeButton:false,
   sceneModePicker:false, navigationHelpButton:false, fullscreenButton:false,
   animation:true, timeline:true, infoBox:true, selectionIndicator:true,
-  terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+  terrainProvider: gsiTerrain(),
 });
+viewer.scene.globe.enableLighting = false;  // 太陽依存の陰影オフ（夜でも暗くならない。3D形状は斜め視点で見える）
 // Voyager地図（明るい＋ほどよく色あり：陸=クリーム/水=淡青/緑地=淡緑）
 viewer.imageryLayers.addImageryProvider(
   new Cesium.UrlTemplateImageryProvider({
