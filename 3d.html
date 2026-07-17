@@ -21,7 +21,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v18-satcache</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v19-satdark</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -76,12 +76,17 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   animation:true, timeline:true, infoBox:true, selectionIndicator:true,
 });
 viewer.scene.globe.enableLighting = false;  // 太陽依存の陰影オフ（夜でも暗くならない）
-// Voyager地図（明るい＋ほどよく色あり：陸=クリーム/水=淡青/緑地=淡緑）
-viewer.imageryLayers.addImageryProvider(
-  new Cesium.UrlTemplateImageryProvider({
-    url: "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-    credit: "© CARTO © OpenStreetMap contributors", maximumLevel: 19 }));
-viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#cfe1ef");
+// 地図テーマ切替：飛行機モード=明るいVoyager / 衛星モード=暗い地図（衛星が際立つ）
+function setBasemap(mode){
+  viewer.imageryLayers.removeAll();
+  const url = mode==='dark'
+    ? "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+    : "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
+  viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+    url, credit:"© CARTO © OpenStreetMap contributors", maximumLevel:19 }));
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(mode==='dark'?"#050a12":"#cfe1ef");
+}
+setBasemap('light');
 // ※3D地形（国土地理院DEM）は一旦無効化（描画不具合の切り分け中）。平面地図で動作を確認する。
 // try { viewer.terrainProvider = gsiTerrain(); } catch(e){ setErr("地形適用スキップ: "+(e&&e.message||e)); }
 viewer.camera.setView({
@@ -192,6 +197,7 @@ async function pollLive(){
 function setLive(){
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
   document.getElementById('bLive').classList.add('on'); setModeLbl("LIVE");
+  setBasemap('light');
   viewer.clock.shouldAnimate=false;
   clearAll(); planes={};
   pollLive(); if(liveTimer)clearInterval(liveTimer); liveTimer=setInterval(pollLive,2000);
@@ -221,6 +227,7 @@ async function setReplay(hoursBack){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
   if(window.event&&event.target)event.target.classList.add('on'); setModeLbl("REPLAY "+hoursBack+"h");
+  setBasemap('light');
   setErr("履歴を読み込み中…"); clearAll();
   const frames=await loadFrames(hoursBack);
   if(!frames.length){ setErr("この期間の記録がありません"); return; }
@@ -304,6 +311,7 @@ async function setSatellites(){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
   if(window.event&&event.target)event.target.classList.add('on'); setModeLbl("SATELLITE");
+  setBasemap('dark');  // 暗い地球＝衛星が際立つ
   setErr("軌道データ取得中…（Starlink含む・十数秒かかることがあります）"); viewer.entities.removeAll();
   const posProp=rec=>new Cesium.CallbackProperty((time)=>satPos(rec,Cesium.JulianDate.toDate(time)),false);
 
@@ -326,22 +334,28 @@ async function setSatellites(){
 
   // ② 大量の群れ：点のみ（Starlink/GPS/Galileo/静止）。数百基まで間引き
   const bulk=[
-    ["GROUP=starlink", "#39d3a6", 3, 700],   // スターリンク（水色）上限700
-    ["GROUP=gps-ops",  "#ffd34d", 4, 40],    // GPS（黄）
-    ["GROUP=galileo",  "#c792ff", 4, 40],    // Galileo（紫）
-    ["GROUP=geo",      "#ff8c42", 3, 120],   // 静止衛星（橙・赤道の帯）
+    ["GROUP=starlink", "Starlink", "#4be0b0", 3, 700],  // スターリンク（水色）上限700
+    ["GROUP=gps-ops",  "GPS",      "#ffd34d", 5, 40],    // GPS（黄）
+    ["GROUP=galileo",  "Galileo",  "#c792ff", 5, 40],    // Galileo（紫）
+    ["GROUP=geo",      "静止衛星", "#ff8c42", 4, 120],   // 静止衛星（橙・赤道の帯）
   ];
-  let bulkCount=0;
-  for(const [g,color,sz,cap] of bulk){
+  const counts=["注目"+featured.length];
+  document.getElementById('cnt').textContent=featured.length;
+  for(const [g,nm,color,sz,cap] of bulk){
+    document.getElementById('upd').textContent=nm+" 取得中…";
     const arr=thin(await fetchTLE(g), cap); const col=Cesium.Color.fromCssColorString(color);
-    for(const s of arr){ viewer.entities.add({ position:posProp(s.rec), point:{ pixelSize:sz, color:col } }); bulkCount++; }
+    for(const s of arr){ viewer.entities.add({ position:posProp(s.rec), point:{ pixelSize:sz, color:col } }); }
+    counts.push(nm+arr.length);
+    document.getElementById('cnt').textContent=viewer.entities.values.length;
+    document.getElementById('upd').textContent=counts.join(" / ");
   }
+  const bulkCount=viewer.entities.values.length-featured.length;
 
   viewer.clock.clockRange=Cesium.ClockRange.UNBOUNDED; viewer.clock.multiplier=1; viewer.clock.shouldAnimate=true;
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(138,25,3.0e7), duration:1.5 });
   document.getElementById('cnt').textContent=featured.length+bulkCount;
-  document.getElementById('upd').textContent=`注目${featured.length}基＋Starlink/GPS/静止 ${bulkCount}基（黄=ISS/橙=CSS）`;
-  setErr(null);
+  document.getElementById('upd').textContent=counts.join(" / ")+"（黄=ISS/橙=CSS/水=Starlink）";
+  setErr(counts.some(c=>c.startsWith("Starlink0"))?"Starlink取得失敗（CelesTrak制限）。数分後に再クリックで復帰":null);
 }
 
 setLive();
