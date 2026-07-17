@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v12-terrain</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v13-terrain2</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -36,6 +36,7 @@ const MODEL_URL = "https://cesium.com/downloads/cesiumjs/releases/1.118/Apps/Sam
 const FT2M = 0.3048;
 const setErr = m => { const e=document.getElementById('err'); if(!m){e.style.display='none';return;} e.style.display='block'; e.textContent=m; };
 const setModeLbl = t => { document.getElementById('mode').textContent=t; };
+window.onerror = (m,src,l,c,e)=>{ try{ setErr("JSエラー: "+m+" @"+l); }catch(_){} };
 
 Cesium.Ion.defaultAccessToken = "";
 
@@ -66,19 +67,22 @@ function gsiTerrain(){
   });
 }
 
+// 地形は初期化後に「後付け」で安全に適用（失敗しても地図は平坦で表示され続ける）
 const viewer = new Cesium.Viewer("cesiumContainer", {
   baseLayer:false, baseLayerPicker:false, geocoder:false, homeButton:false,
   sceneModePicker:false, navigationHelpButton:false, fullscreenButton:false,
   animation:true, timeline:true, infoBox:true, selectionIndicator:true,
-  terrainProvider: gsiTerrain(),
 });
-viewer.scene.globe.enableLighting = false;  // 太陽依存の陰影オフ（夜でも暗くならない。3D形状は斜め視点で見える）
+viewer.scene.globe.enableLighting = false;  // 太陽依存の陰影オフ（夜でも暗くならない）
 // Voyager地図（明るい＋ほどよく色あり：陸=クリーム/水=淡青/緑地=淡緑）
 viewer.imageryLayers.addImageryProvider(
   new Cesium.UrlTemplateImageryProvider({
     url: "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
     credit: "© CARTO © OpenStreetMap contributors", maximumLevel: 19 }));
 viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#cfe1ef");
+// 国土地理院DEMで3D地形（エラー時は平坦地図のまま＝黒画面回避）
+try { viewer.terrainProvider = gsiTerrain(); }
+catch(e){ setErr("地形適用スキップ: "+(e&&e.message||e)); }
 viewer.camera.setView({
   destination: Cesium.Cartesian3.fromDegrees(135.44, 34.02, 46000),
   orientation: { heading:0, pitch: Cesium.Math.toRadians(-27), roll:0 },
