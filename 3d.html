@@ -25,7 +25,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v22-satcategory</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v23-satnames</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -366,7 +366,12 @@ async function setSatellites(){
   for(const [g,color,sz,cap] of [["GROUP=gps-ops","#ffd34d",5,40],["GROUP=galileo","#c792ff",5,40],["GROUP=geo","#ff8c42",4,150]]){
     document.getElementById('upd').textContent=g.replace("GROUP=","")+" 取得中…";
     const arr=thin(await fetchTLE(g), cap); const col=Cesium.Color.fromCssColorString(color);
-    for(const s of arr){ const e=viewer.entities.add({ position:posProp(s.rec), show:satShow.other, point:{ pixelSize:sz, color:col } }); satEnt.other.push(e); }
+    for(const s of arr){ const e=viewer.entities.add({ position:posProp(s.rec), show:satShow.other,
+      point:{ pixelSize:sz, color:col },
+      label:{ text:s.name.replace(/\s*\(.*\)/,'').trim(), font:"10px sans-serif", pixelOffset:new Cesium.Cartesian2(0,-12),
+              fillColor:col, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:2, outlineColor:Cesium.Color.BLACK,
+              distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, 1.2e7) } });  // 近づくと名前表示
+      satEnt.other.push(e); }
   }
   counts.push("その他"+satEnt.other.length);
   // ■ Starlink 全機（高速PointPrimitiveCollection＋分割更新）
