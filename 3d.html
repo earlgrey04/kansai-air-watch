@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v13-terrain2</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v14-flat</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -80,9 +80,8 @@ viewer.imageryLayers.addImageryProvider(
     url: "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
     credit: "© CARTO © OpenStreetMap contributors", maximumLevel: 19 }));
 viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#cfe1ef");
-// 国土地理院DEMで3D地形（エラー時は平坦地図のまま＝黒画面回避）
-try { viewer.terrainProvider = gsiTerrain(); }
-catch(e){ setErr("地形適用スキップ: "+(e&&e.message||e)); }
+// ※3D地形（国土地理院DEM）は一旦無効化（描画不具合の切り分け中）。平面地図で動作を確認する。
+// try { viewer.terrainProvider = gsiTerrain(); } catch(e){ setErr("地形適用スキップ: "+(e&&e.message||e)); }
 viewer.camera.setView({
   destination: Cesium.Cartesian3.fromDegrees(135.44, 34.02, 46000),
   orientation: { heading:0, pitch: Cesium.Math.toRadians(-27), roll:0 },
