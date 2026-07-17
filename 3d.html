@@ -21,7 +21,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v16-satellites</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v18-satcache</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -269,28 +269,7 @@ async function setReplay(hoursBack){
   setErr(null);
 }
 
-// ===== 衛星モード（TLE→SGP4で軌道計算・リアルタイム周回）=====
-async function loadTLEs(){
-  const urls=[
-    "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle",
-    "https://celestrak.org/NORAD/elements/gp.php?GROUP=noaa&FORMAT=tle",
-    "https://celestrak.org/NORAD/elements/gp.php?CATNR=20580&FORMAT=tle", // Hubble
-  ];
-  const sats=[];
-  for(const u of urls){
-    try{
-      const txt=await (await fetch(u)).text();
-      const L=txt.split(/\r?\n/).filter(x=>x.trim());
-      for(let i=0;i+2<L.length;i+=3){
-        const nm=L[i].trim(), l1=L[i+1], l2=L[i+2];
-        if(l1.startsWith("1 ")&&l2.startsWith("2 ")){
-          try{ sats.push({name:nm, rec:satellite.twoline2satrec(l1,l2)}); }catch(e){}
-        }
-      }
-    }catch(e){}
-  }
-  return sats.slice(0,40);
-}
+// ===== 衛星モード（TLE→SGP4）=====
 function satPos(rec, date){
   try{
     const pv=satellite.propagate(rec,date); if(!pv||!pv.position) return undefined;
@@ -298,33 +277,70 @@ function satPos(rec, date){
     return Cesium.Cartesian3.fromRadians(g.longitude, g.latitude, g.height*1000);
   }catch(e){ return undefined; }
 }
+function parseTLE(txt){
+  const sats=[], L=txt.split(/\r?\n/).filter(x=>x.trim());
+  for(let i=0;i+2<L.length;i+=3){
+    const nm=L[i].trim(), l1=L[i+1], l2=L[i+2];
+    if(l1.startsWith("1 ")&&l2.startsWith("2 ")){ try{ sats.push({name:nm, rec:satellite.twoline2satrec(l1,l2)}); }catch(e){} }
+  }
+  return sats;
+}
+// TLEは6時間ブラウザキャッシュ（CelesTrakの再取得制限=403を回避／再クリックも即表示）
+async function fetchTLE(group){
+  const key="tle_"+group, TTL=6*3600*1000;
+  let cached=null; try{ cached=JSON.parse(localStorage.getItem(key)||"null"); }catch(e){}
+  if(cached&&cached.txt&&Date.now()-cached.t<TTL) return parseTLE(cached.txt);
+  try{
+    const txt=await (await fetch("https://celestrak.org/NORAD/elements/gp.php?"+group+"&FORMAT=tle")).text();
+    const sats=parseTLE(txt);
+    if(sats.length){ try{ localStorage.setItem(key,JSON.stringify({t:Date.now(),txt})); }catch(e){} return sats; }
+  }catch(e){}
+  if(cached&&cached.txt) return parseTLE(cached.txt);  // 取得失敗/403時は古いキャッシュで代替
+  return [];
+}
+function thin(arr, cap){ if(arr.length<=cap) return arr; const step=Math.ceil(arr.length/cap); return arr.filter((_,i)=>i%step===0); }
+
 async function setSatellites(){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
   if(window.event&&event.target)event.target.classList.add('on'); setModeLbl("SATELLITE");
-  setErr("軌道データ取得中…"); viewer.entities.removeAll();
-  const sats=await loadTLEs();
-  if(!sats.length){ setErr("軌道データ取得失敗"); return; }
+  setErr("軌道データ取得中…（Starlink含む・十数秒かかることがあります）"); viewer.entities.removeAll();
+  const posProp=rec=>new Cesium.CallbackProperty((time)=>satPos(rec,Cesium.JulianDate.toDate(time)),false);
+
+  // ① 注目衛星：ラベル＋軌道線（ISS/中国CSS/NOAA気象/ハッブル）
+  let featured=[];
+  for(const g of ["GROUP=stations","GROUP=noaa","CATNR=20580"]) featured=featured.concat(await fetchTLE(g));
+  featured=featured.slice(0,45);
   const now=new Date();
-  for(const s of sats){
+  for(const s of featured){
     const iss=/ISS|ZARYA/.test(s.name), css=/CSS|TIANHE/.test(s.name);
     const col=iss?Cesium.Color.YELLOW:(css?Cesium.Color.ORANGE:(/NOAA/.test(s.name)?Cesium.Color.CYAN:Cesium.Color.fromCssColorString("#9fe6ff")));
-    // これから約100分のグラウンドトラック（軌道の目安）
     const path=[]; for(let m=0;m<=100;m+=2){ const p=satPos(s.rec,new Date(now.getTime()+m*60000)); if(p)path.push(p); }
-    viewer.entities.add({
-      position:new Cesium.CallbackProperty((time)=>satPos(s.rec,Cesium.JulianDate.toDate(time)),false),
-      point:{ pixelSize:iss?13:(css?11:7), color:col, outlineColor:Cesium.Color.BLACK, outlineWidth:1 },
+    viewer.entities.add({ position:posProp(s.rec),
+      point:{ pixelSize:iss?13:(css?11:6), color:col, outlineColor:Cesium.Color.BLACK, outlineWidth:1 },
       label:{ text:s.name.replace(/\s*\(.*\)/,''), font:(iss||css?"bold ":"")+"11px sans-serif", pixelOffset:new Cesium.Cartesian2(0,-16),
               fillColor:col, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3, outlineColor:Cesium.Color.BLACK,
               distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, iss||css?9e7:2.5e7) },
-      polyline:{ positions:path, width:1, material:col.withAlpha(0.35), arcType:Cesium.ArcType.NONE },
-    });
+      polyline:{ positions:path, width:1, material:col.withAlpha(0.35), arcType:Cesium.ArcType.NONE } });
   }
-  // 地球全体が見えるよう引く＋時計をリアルタイム進行
+
+  // ② 大量の群れ：点のみ（Starlink/GPS/Galileo/静止）。数百基まで間引き
+  const bulk=[
+    ["GROUP=starlink", "#39d3a6", 3, 700],   // スターリンク（水色）上限700
+    ["GROUP=gps-ops",  "#ffd34d", 4, 40],    // GPS（黄）
+    ["GROUP=galileo",  "#c792ff", 4, 40],    // Galileo（紫）
+    ["GROUP=geo",      "#ff8c42", 3, 120],   // 静止衛星（橙・赤道の帯）
+  ];
+  let bulkCount=0;
+  for(const [g,color,sz,cap] of bulk){
+    const arr=thin(await fetchTLE(g), cap); const col=Cesium.Color.fromCssColorString(color);
+    for(const s of arr){ viewer.entities.add({ position:posProp(s.rec), point:{ pixelSize:sz, color:col } }); bulkCount++; }
+  }
+
   viewer.clock.clockRange=Cesium.ClockRange.UNBOUNDED; viewer.clock.multiplier=1; viewer.clock.shouldAnimate=true;
-  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(138,25,2.4e7), duration:1.5 });
-  document.getElementById('cnt').textContent=sats.length;
-  document.getElementById('upd').textContent="衛星"+sats.length+"基（黄=ISS/橙=中国CSS）";
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(138,25,3.0e7), duration:1.5 });
+  document.getElementById('cnt').textContent=featured.length+bulkCount;
+  document.getElementById('upd').textContent=`注目${featured.length}基＋Starlink/GPS/静止 ${bulkCount}基（黄=ISS/橙=CSS）`;
   setErr(null);
 }
 
