@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v14-flat</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v15-airports</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -131,11 +131,24 @@ function modelOrientation(pos, fwd){
 }
 
 function addAirports(){
-  for (const [nm,la,lo] of [["伊丹",34.7855,135.4382],["関西",34.4342,135.2330],["神戸",34.6328,135.2239]]){
+  // 主役=関西3空港（赤・大きめ）
+  const PRIMARY=[["伊丹",34.7855,135.4382],["関西",34.4342,135.2330],["神戸",34.6328,135.2239]];
+  // 受信圏内の地方空港（オレンジ・小さめ）。現在の受信状況で近傍traffic◎の6空港
+  const REGIONAL=[["徳島",34.1328,134.6067],["高松",34.2142,134.0156],["岡山",34.7569,133.8553],
+                  ["南紀白浜",33.6622,135.3644],["但馬",35.5127,134.7869],["高知",33.5461,133.6694]];
+  for (const [nm,la,lo] of PRIMARY){
     viewer.entities.add({ id:"ap_"+nm, position:Cesium.Cartesian3.fromDegrees(lo,la,0),
       point:{ pixelSize:10, color:Cesium.Color.fromCssColorString("#c0392b"), outlineColor:Cesium.Color.WHITE, outlineWidth:2, disableDepthTestDistance:Number.POSITIVE_INFINITY },
       label:{ text:nm, font:"bold 13px sans-serif", pixelOffset:new Cesium.Cartesian2(0,16), fillColor:Cesium.Color.fromCssColorString("#0a3d62"),
               style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3, outlineColor:Cesium.Color.WHITE,
+              disableDepthTestDistance:Number.POSITIVE_INFINITY } });
+  }
+  for (const [nm,la,lo] of REGIONAL){
+    viewer.entities.add({ id:"ap_"+nm, position:Cesium.Cartesian3.fromDegrees(lo,la,0),
+      point:{ pixelSize:7, color:Cesium.Color.fromCssColorString("#e67e22"), outlineColor:Cesium.Color.WHITE, outlineWidth:1.5, disableDepthTestDistance:Number.POSITIVE_INFINITY },
+      label:{ text:nm, font:"11px sans-serif", pixelOffset:new Cesium.Cartesian2(0,14), fillColor:Cesium.Color.fromCssColorString("#7a4310"),
+              style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:2.5, outlineColor:Cesium.Color.WHITE,
+              distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, 6.0e5),  // 遠すぎる時はラベル非表示
               disableDepthTestDistance:Number.POSITIVE_INFINITY } });
   }
 }
