@@ -7,6 +7,7 @@
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Cesium.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.118/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/5.0.0/satellite.min.js"></script>
 <style>
   html, body, #cesiumContainer { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:#000; }
   #hud { position:absolute; top:10px; left:10px; z-index:10; background:rgba(10,30,50,.8); color:#dfeaff;
@@ -20,12 +21,13 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v15-airports</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v16-satellites</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
   <button onclick="setReplay(3)">🕒 3時間</button>
   <button onclick="setReplay(6)">🕕 6時間</button>
+  <button onclick="setSatellites()">🛰️ 衛星</button>
 </div>
 <div id="err"></div>
 <script>
@@ -264,6 +266,65 @@ async function setReplay(hoursBack){
   viewer.timeline.zoomTo(t0,t1);
   document.getElementById('cnt').textContent=Object.keys(sampled).length;
   document.getElementById('upd').textContent="タイムラインをドラッグで移動 / ▶で再生";
+  setErr(null);
+}
+
+// ===== 衛星モード（TLE→SGP4で軌道計算・リアルタイム周回）=====
+async function loadTLEs(){
+  const urls=[
+    "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle",
+    "https://celestrak.org/NORAD/elements/gp.php?GROUP=noaa&FORMAT=tle",
+    "https://celestrak.org/NORAD/elements/gp.php?CATNR=20580&FORMAT=tle", // Hubble
+  ];
+  const sats=[];
+  for(const u of urls){
+    try{
+      const txt=await (await fetch(u)).text();
+      const L=txt.split(/\r?\n/).filter(x=>x.trim());
+      for(let i=0;i+2<L.length;i+=3){
+        const nm=L[i].trim(), l1=L[i+1], l2=L[i+2];
+        if(l1.startsWith("1 ")&&l2.startsWith("2 ")){
+          try{ sats.push({name:nm, rec:satellite.twoline2satrec(l1,l2)}); }catch(e){}
+        }
+      }
+    }catch(e){}
+  }
+  return sats.slice(0,40);
+}
+function satPos(rec, date){
+  try{
+    const pv=satellite.propagate(rec,date); if(!pv||!pv.position) return undefined;
+    const g=satellite.eciToGeodetic(pv.position, satellite.gstime(date));
+    return Cesium.Cartesian3.fromRadians(g.longitude, g.latitude, g.height*1000);
+  }catch(e){ return undefined; }
+}
+async function setSatellites(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  if(window.event&&event.target)event.target.classList.add('on'); setModeLbl("SATELLITE");
+  setErr("軌道データ取得中…"); viewer.entities.removeAll();
+  const sats=await loadTLEs();
+  if(!sats.length){ setErr("軌道データ取得失敗"); return; }
+  const now=new Date();
+  for(const s of sats){
+    const iss=/ISS|ZARYA/.test(s.name), css=/CSS|TIANHE/.test(s.name);
+    const col=iss?Cesium.Color.YELLOW:(css?Cesium.Color.ORANGE:(/NOAA/.test(s.name)?Cesium.Color.CYAN:Cesium.Color.fromCssColorString("#9fe6ff")));
+    // これから約100分のグラウンドトラック（軌道の目安）
+    const path=[]; for(let m=0;m<=100;m+=2){ const p=satPos(s.rec,new Date(now.getTime()+m*60000)); if(p)path.push(p); }
+    viewer.entities.add({
+      position:new Cesium.CallbackProperty((time)=>satPos(s.rec,Cesium.JulianDate.toDate(time)),false),
+      point:{ pixelSize:iss?13:(css?11:7), color:col, outlineColor:Cesium.Color.BLACK, outlineWidth:1 },
+      label:{ text:s.name.replace(/\s*\(.*\)/,''), font:(iss||css?"bold ":"")+"11px sans-serif", pixelOffset:new Cesium.Cartesian2(0,-16),
+              fillColor:col, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3, outlineColor:Cesium.Color.BLACK,
+              distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, iss||css?9e7:2.5e7) },
+      polyline:{ positions:path, width:1, material:col.withAlpha(0.35), arcType:Cesium.ArcType.NONE },
+    });
+  }
+  // 地球全体が見えるよう引く＋時計をリアルタイム進行
+  viewer.clock.clockRange=Cesium.ClockRange.UNBOUNDED; viewer.clock.multiplier=1; viewer.clock.shouldAnimate=true;
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(138,25,2.4e7), duration:1.5 });
+  document.getElementById('cnt').textContent=sats.length;
+  document.getElementById('upd').textContent="衛星"+sats.length+"基（黄=ISS/橙=中国CSS）";
   setErr(null);
 }
 
