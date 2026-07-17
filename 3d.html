@@ -21,7 +21,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v20-starlink-supp</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v21-starlink-all</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -163,6 +163,8 @@ function clearAll(){ viewer.entities.removeAll(); addAirports(); }
 
 // ===== LIVE =====（位置=最新の定数、向き=trackから直接。差分なし）
 let liveTimer=null, planes={};
+let starCollection=null, starRecs=[], starTimer=null;  // Starlink全機用（高速点描画）
+function clearStarlink(){ if(starTimer){clearInterval(starTimer);starTimer=null;} if(starCollection){viewer.scene.primitives.remove(starCollection);starCollection=null;} starRecs=[]; }
 function upsertLive(a){
   const ft=(a.alt_baro==="ground")?0:(typeof a.alt_baro==="number"?a.alt_baro:null);
   const pos=Cesium.Cartesian3.fromDegrees(a.lon,a.lat,Math.max(0,(ft??0)*FT2M));
@@ -194,12 +196,14 @@ async function pollLive(){
     document.getElementById('cnt').textContent=n; document.getElementById('upd').textContent=new Date().toLocaleTimeString('ja-JP'); setErr(null);
   }catch(e){ setErr("取得エラー: "+(e&&e.message||e)); }
 }
+function kansaiView(){ viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(135.44,34.02,46000), orientation:{heading:0,pitch:Cesium.Math.toRadians(-27),roll:0}, duration:1.2 }); }
 function setLive(){
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
   document.getElementById('bLive').classList.add('on'); setModeLbl("LIVE");
-  setBasemap('light');
+  clearStarlink(); setBasemap('light');
   viewer.clock.shouldAnimate=false;
   clearAll(); planes={};
+  kansaiView();  // 衛星モード等から戻ったら関西へ自動ズーム
   pollLive(); if(liveTimer)clearInterval(liveTimer); liveTimer=setInterval(pollLive,2000);
 }
 
@@ -227,7 +231,7 @@ async function setReplay(hoursBack){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
   if(window.event&&event.target)event.target.classList.add('on'); setModeLbl("REPLAY "+hoursBack+"h");
-  setBasemap('light');
+  clearStarlink(); setBasemap('light'); kansaiView();
   setErr("履歴を読み込み中…"); clearAll();
   const frames=await loadFrames(hoursBack);
   if(!frames.length){ setErr("この期間の記録がありません"); return; }
@@ -314,7 +318,7 @@ async function setSatellites(){
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
   if(window.event&&event.target)event.target.classList.add('on'); setModeLbl("SATELLITE");
   setBasemap('dark');  // 暗い地球＝衛星が際立つ
-  setErr("軌道データ取得中…（Starlink含む・十数秒かかることがあります）"); viewer.entities.removeAll();
+  setErr("軌道データ取得中…（Starlink含む・十数秒かかることがあります）"); viewer.entities.removeAll(); clearStarlink();
   const posProp=rec=>new Cesium.CallbackProperty((time)=>satPos(rec,Cesium.JulianDate.toDate(time)),false);
 
   // ① 注目衛星：ラベル＋軌道線（ISS/中国CSS/NOAA気象/ハッブル）
@@ -335,11 +339,11 @@ async function setSatellites(){
   }
 
   // ② 大量の群れ：点のみ（Starlink/GPS/Galileo/静止）。数百基まで間引き
+  // GPS/Galileo/静止 は数が少ないのでentityで（点）
   const bulk=[
-    ["https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=starlink&FORMAT=tle", "Starlink", "#4be0b0", 3, 700],  // 制限されないsupplemental（全量）→上限700に間引き
     ["GROUP=gps-ops",  "GPS",      "#ffd34d", 5, 40],    // GPS（黄）
     ["GROUP=galileo",  "Galileo",  "#c792ff", 5, 40],    // Galileo（紫）
-    ["GROUP=geo",      "静止衛星", "#ff8c42", 4, 120],   // 静止衛星（橙・赤道の帯）
+    ["GROUP=geo",      "静止衛星", "#ff8c42", 4, 150],   // 静止衛星（橙・赤道の帯）
   ];
   const counts=["注目"+featured.length];
   document.getElementById('cnt').textContent=featured.length;
@@ -351,13 +355,30 @@ async function setSatellites(){
     document.getElementById('cnt').textContent=viewer.entities.values.length;
     document.getElementById('upd').textContent=counts.join(" / ");
   }
-  const bulkCount=viewer.entities.values.length-featured.length;
+  // ③ Starlink 全機（数千基）：高速なPointPrimitiveCollection＋位置更新を分割してカクつき抑制
+  document.getElementById('upd').textContent=counts.join(" / ")+" / Starlink全機 取得中…(1.8MB)";
+  const SL="https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=starlink&FORMAT=tle";
+  starRecs=(await fetchTLE(SL)).map(s=>s.rec);
+  if(starRecs.length){
+    starCollection=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+    const scol=Cesium.Color.fromCssColorString("#4be0b0");
+    const t0=Cesium.JulianDate.toDate(viewer.clock.currentTime);
+    for(const rec of starRecs){ const p=satPos(rec,t0); starCollection.add({ position:p||new Cesium.Cartesian3(7e6,0,0), pixelSize:2, color:scol }); }
+    let si=0;
+    starTimer=setInterval(()=>{
+      const date=Cesium.JulianDate.toDate(viewer.clock.currentTime), CH=2500;
+      for(let k=0;k<CH;k++){ const i=(si+k)%starRecs.length; const p=satPos(starRecs[i],date); if(p) starCollection.get(i).position=p; }
+      si=(si+CH)%starRecs.length;
+    }, 120);
+    counts.push("Starlink"+starRecs.length);
+  }
+  const bulkCount=(viewer.entities.values.length-featured.length)+starRecs.length;
 
   viewer.clock.clockRange=Cesium.ClockRange.UNBOUNDED; viewer.clock.multiplier=1; viewer.clock.shouldAnimate=true;
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(138,25,3.0e7), duration:1.5 });
   document.getElementById('cnt').textContent=featured.length+bulkCount;
-  document.getElementById('upd').textContent=counts.join(" / ")+"（黄=ISS/橙=CSS/水=Starlink）";
-  setErr(counts.some(c=>c.startsWith("Starlink0"))?"Starlink取得失敗（CelesTrak制限）。数分後に再クリックで復帰":null);
+  document.getElementById('upd').textContent=counts.join(" / ")+"（黄=ISS/橙=CSS/水=Starlink全機）";
+  setErr(starRecs.length?null:"Starlink取得失敗。数分後に🛰️再クリックで復帰");
 }
 
 setLive();
