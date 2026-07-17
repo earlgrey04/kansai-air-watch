@@ -14,20 +14,29 @@
          font:13px/1.5 -apple-system,"Hiragino Kaku Gothic ProN",sans-serif; padding:9px 12px; border-radius:10px; max-width:70vw; }
   #hud b { color:#7fc4ff; } #hud .cnt { font-size:18px; font-weight:800; color:#fff; }
   #bar { position:absolute; top:10px; right:10px; z-index:10; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
-  #bar button { font:13px sans-serif; padding:7px 11px; border:none; border-radius:8px; background:rgba(20,40,64,.85); color:#cfe0f5; }
+  #bar button, #satbar button { font:13px sans-serif; padding:7px 11px; border:none; border-radius:8px; background:rgba(20,40,64,.85); color:#cfe0f5; }
   #bar button.on { background:#2563eb; color:#fff; font-weight:700; }
+  #satbar { position:absolute; top:54px; right:10px; z-index:10; display:none; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  #satbar button.on { background:#0f9d6b; color:#fff; font-weight:700; }
+  #satbar button { opacity:.65; }
+  #satbar button.on { opacity:1; }
   #err { position:absolute; bottom:34px; left:10px; z-index:10; color:#ff9b9b; font:12px monospace; background:rgba(0,0,0,.6); padding:4px 8px; border-radius:6px; display:none; }
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v21-starlink-all</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v22-satcategory</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
   <button onclick="setReplay(3)">🕒 3時間</button>
   <button onclick="setReplay(6)">🕕 6時間</button>
   <button onclick="setSatellites()">🛰️ 衛星</button>
+</div>
+<div id="satbar">
+  <button id="tStar" class="on" onclick="toggleSat('star')">Starlink</button>
+  <button id="tISS" class="on" onclick="toggleSat('iss')">ISS/ステーション</button>
+  <button id="tOther" class="on" onclick="toggleSat('other')">その他</button>
 </div>
 <div id="err"></div>
 <script>
@@ -164,7 +173,16 @@ function clearAll(){ viewer.entities.removeAll(); addAirports(); }
 // ===== LIVE =====（位置=最新の定数、向き=trackから直接。差分なし）
 let liveTimer=null, planes={};
 let starCollection=null, starRecs=[], starTimer=null;  // Starlink全機用（高速点描画）
-function clearStarlink(){ if(starTimer){clearInterval(starTimer);starTimer=null;} if(starCollection){viewer.scene.primitives.remove(starCollection);starCollection=null;} starRecs=[]; }
+function clearStarlink(){ if(starTimer){clearInterval(starTimer);starTimer=null;} if(starCollection){viewer.scene.primitives.remove(starCollection);starCollection=null;} starRecs=[]; const sb=document.getElementById('satbar'); if(sb)sb.style.display='none'; }
+// 衛星カテゴリ表示切替（Starlink / ISS・ステーション / その他）
+let satEnt={iss:[], other:[]}, satShow={star:true, iss:true, other:true};
+function toggleSat(cat){
+  satShow[cat]=!satShow[cat];
+  const id={star:'tStar',iss:'tISS',other:'tOther'}[cat];
+  document.getElementById(id).classList.toggle('on', satShow[cat]);
+  if(cat==='star'){ if(starCollection) starCollection.show=satShow.star; }
+  else{ for(const e of satEnt[cat]) e.show=satShow[cat]; }
+}
 function upsertLive(a){
   const ft=(a.alt_baro==="ground")?0:(typeof a.alt_baro==="number"?a.alt_baro:null);
   const pos=Cesium.Cartesian3.fromDegrees(a.lon,a.lat,Math.max(0,(ft??0)*FT2M));
@@ -321,46 +339,43 @@ async function setSatellites(){
   setErr("軌道データ取得中…（Starlink含む・十数秒かかることがあります）"); viewer.entities.removeAll(); clearStarlink();
   const posProp=rec=>new Cesium.CallbackProperty((time)=>satPos(rec,Cesium.JulianDate.toDate(time)),false);
 
-  // ① 注目衛星：ラベル＋軌道線（ISS/中国CSS/NOAA気象/ハッブル）
-  let featured=[];
-  for(const g of ["GROUP=stations","GROUP=noaa","CATNR=20580"]) featured=featured.concat(await fetchTLE(g));
-  featured=featured.slice(0,45);
+  satEnt={iss:[], other:[]};
   const now=new Date();
-  for(const s of featured){
+  // ラベル＋軌道線つきの衛星を追加してカテゴリ配列へ
+  function addFeatured(s,cat){
     const iss=/ISS|ZARYA/.test(s.name), css=/CSS|TIANHE/.test(s.name);
     const col=iss?Cesium.Color.YELLOW:(css?Cesium.Color.ORANGE:(/NOAA/.test(s.name)?Cesium.Color.CYAN:Cesium.Color.fromCssColorString("#9fe6ff")));
     const path=[]; for(let m=0;m<=100;m+=2){ const p=satPos(s.rec,new Date(now.getTime()+m*60000)); if(p)path.push(p); }
-    viewer.entities.add({ position:posProp(s.rec),
+    const e=viewer.entities.add({ position:posProp(s.rec), show:satShow[cat],
       point:{ pixelSize:iss?13:(css?11:6), color:col, outlineColor:Cesium.Color.BLACK, outlineWidth:1 },
       label:{ text:s.name.replace(/\s*\(.*\)/,''), font:(iss||css?"bold ":"")+"11px sans-serif", pixelOffset:new Cesium.Cartesian2(0,-16),
               fillColor:col, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3, outlineColor:Cesium.Color.BLACK,
               distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, iss||css?9e7:2.5e7) },
       polyline:{ positions:path, width:1, material:col.withAlpha(0.35), arcType:Cesium.ArcType.NONE } });
+    satEnt[cat].push(e);
   }
-
-  // ② 大量の群れ：点のみ（Starlink/GPS/Galileo/静止）。数百基まで間引き
-  // GPS/Galileo/静止 は数が少ないのでentityで（点）
-  const bulk=[
-    ["GROUP=gps-ops",  "GPS",      "#ffd34d", 5, 40],    // GPS（黄）
-    ["GROUP=galileo",  "Galileo",  "#c792ff", 5, 40],    // Galileo（紫）
-    ["GROUP=geo",      "静止衛星", "#ff8c42", 4, 150],   // 静止衛星（橙・赤道の帯）
-  ];
-  const counts=["注目"+featured.length];
-  document.getElementById('cnt').textContent=featured.length;
-  for(const [g,nm,color,sz,cap] of bulk){
-    document.getElementById('upd').textContent=nm+" 取得中…";
+  const counts=[];
+  // ■ ISS・ステーション（宇宙ステーション類）
+  document.getElementById('upd').textContent="ISS/ステーション取得中…";
+  for(const s of (await fetchTLE("GROUP=stations")).slice(0,25)) addFeatured(s,'iss');
+  counts.push("ISS/ステ"+satEnt.iss.length);
+  // ■ その他：NOAA気象＋ハッブル（ラベル付）
+  for(const s of (await fetchTLE("GROUP=noaa")).slice(0,20)) addFeatured(s,'other');
+  for(const s of (await fetchTLE("CATNR=20580"))) addFeatured(s,'other');
+  // ■ その他：GPS/Galileo/静止（点）
+  for(const [g,color,sz,cap] of [["GROUP=gps-ops","#ffd34d",5,40],["GROUP=galileo","#c792ff",5,40],["GROUP=geo","#ff8c42",4,150]]){
+    document.getElementById('upd').textContent=g.replace("GROUP=","")+" 取得中…";
     const arr=thin(await fetchTLE(g), cap); const col=Cesium.Color.fromCssColorString(color);
-    for(const s of arr){ viewer.entities.add({ position:posProp(s.rec), point:{ pixelSize:sz, color:col } }); }
-    counts.push(nm+arr.length);
-    document.getElementById('cnt').textContent=viewer.entities.values.length;
-    document.getElementById('upd').textContent=counts.join(" / ");
+    for(const s of arr){ const e=viewer.entities.add({ position:posProp(s.rec), show:satShow.other, point:{ pixelSize:sz, color:col } }); satEnt.other.push(e); }
   }
-  // ③ Starlink 全機（数千基）：高速なPointPrimitiveCollection＋位置更新を分割してカクつき抑制
+  counts.push("その他"+satEnt.other.length);
+  // ■ Starlink 全機（高速PointPrimitiveCollection＋分割更新）
   document.getElementById('upd').textContent=counts.join(" / ")+" / Starlink全機 取得中…(1.8MB)";
   const SL="https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=starlink&FORMAT=tle";
   starRecs=(await fetchTLE(SL)).map(s=>s.rec);
   if(starRecs.length){
     starCollection=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+    starCollection.show=satShow.star;
     const scol=Cesium.Color.fromCssColorString("#4be0b0");
     const t0=Cesium.JulianDate.toDate(viewer.clock.currentTime);
     for(const rec of starRecs){ const p=satPos(rec,t0); starCollection.add({ position:p||new Cesium.Cartesian3(7e6,0,0), pixelSize:2, color:scol }); }
@@ -372,12 +387,12 @@ async function setSatellites(){
     }, 120);
     counts.push("Starlink"+starRecs.length);
   }
-  const bulkCount=(viewer.entities.values.length-featured.length)+starRecs.length;
 
   viewer.clock.clockRange=Cesium.ClockRange.UNBOUNDED; viewer.clock.multiplier=1; viewer.clock.shouldAnimate=true;
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(138,25,3.0e7), duration:1.5 });
-  document.getElementById('cnt').textContent=featured.length+bulkCount;
-  document.getElementById('upd').textContent=counts.join(" / ")+"（黄=ISS/橙=CSS/水=Starlink全機）";
+  document.getElementById('satbar').style.display='flex';  // カテゴリ切替バー表示
+  document.getElementById('cnt').textContent=satEnt.iss.length+satEnt.other.length+starRecs.length;
+  document.getElementById('upd').textContent=counts.join(" / ")+"（右上でカテゴリ切替）";
   setErr(starRecs.length?null:"Starlink取得失敗。数分後に🛰️再クリックで復帰");
 }
 
