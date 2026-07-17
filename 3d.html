@@ -25,7 +25,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v26-rain</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v27-jma-rain</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -86,16 +86,14 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   animation:true, timeline:true, infoBox:true, selectionIndicator:true,
 });
 viewer.scene.globe.enableLighting = false;  // 太陽依存の陰影オフ（夜でも暗くならない）
-// 気象（雨雲レーダー：RainViewer 世界の降水）
-let weatherOn=false, weatherHost=null, weatherPath=null, curBasemap='light';
+// 気象（雨雲：気象庁 高解像度降水ナウキャスト hrpns・日本・ズーム10）
+let weatherOn=false, weatherBase=null, weatherValid=null, curBasemap='light';
 async function loadWeatherFrame(){
   try{
-    const j=await (await fetch("https://api.rainviewer.com/public/weather-maps.json")).json();
-    weatherHost=j.host;
-    const past=(j.radar&&j.radar.past)||[], now=(j.radar&&j.radar.nowcast)||[];
-    const frame = now.length?now[0]:(past.length?past[past.length-1]:null);
-    weatherPath = frame?frame.path:null;
-    return !!weatherPath;
+    const idx=await (await fetch("https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json")).json();
+    const f=idx.find(e=>e.basetime===e.validtime)||idx[0]; // 観測（現在）を優先
+    weatherBase=f.basetime; weatherValid=f.validtime;
+    return !!weatherBase;
   }catch(e){ return false; }
 }
 // 地図テーマ切替＋雨雲レイヤー：飛行機モード=明るいVoyager / 衛星モード=暗い地図
@@ -108,11 +106,12 @@ function setBasemap(mode){
   viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
     url, credit:"© CARTO © OpenStreetMap contributors", maximumLevel:19 }));
   viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(mode==='dark'?"#050a12":"#cfe1ef");
-  // 雨雲を上に重ねる（衛星モード以外・ON時のみ）
-  if(weatherOn && mode!=='dark' && weatherPath){
+  // 雨雲を上に重ねる（衛星モード以外・ON時のみ）＝気象庁 高解像度降水ナウキャスト
+  if(weatherOn && mode!=='dark' && weatherBase){
     const wl=viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-      url: weatherHost+weatherPath+"/256/{z}/{x}/{y}/2/1_1.png", maximumLevel:12 }));
-    wl.alpha=0.78;
+      url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/${weatherBase}/none/${weatherValid}/surf/hrpns/{z}/{x}/{y}.png`,
+      maximumLevel:10, credit:"気象庁ナウキャスト" }));
+    wl.alpha=0.75;
   }
 }
 async function toggleWeather(){
