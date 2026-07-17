@@ -25,7 +25,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v24-geonames</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v25-geoall</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -364,7 +364,7 @@ async function setSatellites(){
   for(const s of (await fetchTLE("CATNR=20580"))) addFeatured(s,'other');
   // ■ その他：GPS/Galileo/静止（点）
   // 末尾ld=名前を表示する最大距離。GEOは遠い(3.6万km)ので常時表示、GPS/Galileoは広めに
-  for(const [g,color,sz,cap,ld] of [["GROUP=gps-ops","#ffd34d",5,40,4e7],["GROUP=galileo","#c792ff",5,40,4e7],["GROUP=geo","#ff8c42",4,150,2e8]]){
+  for(const [g,color,sz,cap,ld] of [["GROUP=gps-ops","#ffd34d",5,40,4e7],["GROUP=galileo","#c792ff",5,40,4e7],["GROUP=geo","#ff8c42",4,9999,1.6e7]]){  // 静止衛星は全機（約570）／名前は寄ると表示
     document.getElementById('upd').textContent=g.replace("GROUP=","")+" 取得中…";
     const arr=thin(await fetchTLE(g), cap); const col=Cesium.Color.fromCssColorString(color);
     for(const s of arr){ const e=viewer.entities.add({ position:posProp(s.rec), show:satShow.other,
