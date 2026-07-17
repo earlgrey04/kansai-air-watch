@@ -25,13 +25,14 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v25-geoall</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v26-rain</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
   <button onclick="setReplay(3)">🕒 3時間</button>
   <button onclick="setReplay(6)">🕕 6時間</button>
   <button onclick="setSatellites()">🛰️ 衛星</button>
+  <button id="bWx" onclick="toggleWeather()">☁️ 雨雲</button>
 </div>
 <div id="satbar">
   <button id="tStar" class="on" onclick="toggleSat('star')">Starlink</button>
@@ -85,8 +86,21 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   animation:true, timeline:true, infoBox:true, selectionIndicator:true,
 });
 viewer.scene.globe.enableLighting = false;  // 太陽依存の陰影オフ（夜でも暗くならない）
-// 地図テーマ切替：飛行機モード=明るいVoyager / 衛星モード=暗い地図（衛星が際立つ）
+// 気象（雨雲レーダー：RainViewer 世界の降水）
+let weatherOn=false, weatherHost=null, weatherPath=null, curBasemap='light';
+async function loadWeatherFrame(){
+  try{
+    const j=await (await fetch("https://api.rainviewer.com/public/weather-maps.json")).json();
+    weatherHost=j.host;
+    const past=(j.radar&&j.radar.past)||[], now=(j.radar&&j.radar.nowcast)||[];
+    const frame = now.length?now[0]:(past.length?past[past.length-1]:null);
+    weatherPath = frame?frame.path:null;
+    return !!weatherPath;
+  }catch(e){ return false; }
+}
+// 地図テーマ切替＋雨雲レイヤー：飛行機モード=明るいVoyager / 衛星モード=暗い地図
 function setBasemap(mode){
+  curBasemap=mode;
   viewer.imageryLayers.removeAll();
   const url = mode==='dark'
     ? "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
@@ -94,7 +108,20 @@ function setBasemap(mode){
   viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
     url, credit:"© CARTO © OpenStreetMap contributors", maximumLevel:19 }));
   viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(mode==='dark'?"#050a12":"#cfe1ef");
+  // 雨雲を上に重ねる（衛星モード以外・ON時のみ）
+  if(weatherOn && mode!=='dark' && weatherPath){
+    const wl=viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url: weatherHost+weatherPath+"/256/{z}/{x}/{y}/2/1_1.png", maximumLevel:12 }));
+    wl.alpha=0.78;
+  }
 }
+async function toggleWeather(){
+  weatherOn=!weatherOn;
+  const b=document.getElementById('bWx'); if(b)b.classList.toggle('on',weatherOn);
+  if(weatherOn){ setErr("雨雲取得中…"); const ok=await loadWeatherFrame(); setErr(ok?null:"雨雲取得失敗"); }
+  setBasemap(curBasemap);
+}
+setInterval(()=>{ if(weatherOn){ loadWeatherFrame().then(ok=>{ if(ok)setBasemap(curBasemap); }); } }, 5*60*1000); // 5分毎に更新
 setBasemap('light');
 // ※3D地形（国土地理院DEM）は一旦無効化（描画不具合の切り分け中）。平面地図で動作を確認する。
 // try { viewer.terrainProvider = gsiTerrain(); } catch(e){ setErr("地形適用スキップ: "+(e&&e.message||e)); }
