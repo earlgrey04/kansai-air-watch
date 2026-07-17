@@ -21,7 +21,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v19-satdark</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v20-starlink-supp</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -293,12 +293,14 @@ function parseTLE(txt){
   return sats;
 }
 // TLEは6時間ブラウザキャッシュ（CelesTrakの再取得制限=403を回避／再クリックも即表示）
-async function fetchTLE(group){
-  const key="tle_"+group, TTL=6*3600*1000;
+// specが"http"で始まれば完全URL（supplemental等）、そうでなければGROUP指定
+async function fetchTLE(spec){
+  const url = spec.startsWith("http") ? spec : "https://celestrak.org/NORAD/elements/gp.php?"+spec+"&FORMAT=tle";
+  const key="tle_"+spec, TTL=6*3600*1000;
   let cached=null; try{ cached=JSON.parse(localStorage.getItem(key)||"null"); }catch(e){}
   if(cached&&cached.txt&&Date.now()-cached.t<TTL) return parseTLE(cached.txt);
   try{
-    const txt=await (await fetch("https://celestrak.org/NORAD/elements/gp.php?"+group+"&FORMAT=tle")).text();
+    const txt=await (await fetch(url)).text();
     const sats=parseTLE(txt);
     if(sats.length){ try{ localStorage.setItem(key,JSON.stringify({t:Date.now(),txt})); }catch(e){} return sats; }
   }catch(e){}
@@ -334,7 +336,7 @@ async function setSatellites(){
 
   // ② 大量の群れ：点のみ（Starlink/GPS/Galileo/静止）。数百基まで間引き
   const bulk=[
-    ["GROUP=starlink", "Starlink", "#4be0b0", 3, 700],  // スターリンク（水色）上限700
+    ["https://celestrak.org/NORAD/elements/supplemental/sup-gp.php?FILE=starlink&FORMAT=tle", "Starlink", "#4be0b0", 3, 700],  // 制限されないsupplemental（全量）→上限700に間引き
     ["GROUP=gps-ops",  "GPS",      "#ffd34d", 5, 40],    // GPS（黄）
     ["GROUP=galileo",  "Galileo",  "#c792ff", 5, 40],    // Galileo（紫）
     ["GROUP=geo",      "静止衛星", "#ff8c42", 4, 120],   // 静止衛星（橙・赤道の帯）
