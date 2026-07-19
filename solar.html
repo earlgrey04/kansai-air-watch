@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>そらのがっこう 〜太陽・地球・月と太陽系〜</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#05070f;
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;}
+  #c{display:block;width:100%;height:100%;}
+  .panel{position:absolute;z-index:10;color:#eaf2ff;}
+  #top{top:8px;left:8px;right:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+  #title{font-weight:800;font-size:15px;margin-right:4px;text-shadow:0 1px 3px #000;}
+  .btn{font:13px sans-serif;padding:7px 11px;border:none;border-radius:9px;
+    background:rgba(30,45,75,.85);color:#cfe0f5;cursor:pointer;}
+  .btn.on{background:#f5b942;color:#20140a;font-weight:800;}
+  #back{background:rgba(20,30,55,.85);}
+  #bottom{left:8px;right:8px;bottom:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;
+    background:rgba(8,16,34,.72);padding:8px 10px;border-radius:12px;}
+  #bottom .btn{background:rgba(40,60,95,.9);}
+  #bottom .btn.on{background:#4aa3ff;color:#fff;font-weight:800;}
+  #date{font-weight:700;font-size:13px;min-width:150px;}
+  #hint{font-size:11px;color:#9fb8d6;flex-basis:100%;}
+  #play{font-size:16px;padding:6px 12px;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="top" class="panel">
+  <span id="title">🪐 そらのがっこう</span>
+  <button class="btn on" id="mEarth" onclick="setMode('earth')">☀️🌍🌙 太陽・地球・月</button>
+  <button class="btn" id="mSolar" onclick="setMode('solar')">🪐 太陽系ぜんたい</button>
+  <button class="btn" id="back" onclick="location.href='3d.html'">← フライトへ</button>
+</div>
+
+<div id="bottom" class="panel">
+  <button class="btn" id="play" onclick="togglePlay()">⏸</button>
+  <span id="date">—</span>
+  <button class="btn" onclick="setSpeed(1)">リアル</button>
+  <button class="btn" onclick="setSpeed(3600)">1時間/秒</button>
+  <button class="btn on" id="spd" onclick="setSpeed(86400)">1日/秒</button>
+  <button class="btn" onclick="setSpeed(2592000)">1か月/秒</button>
+  <button class="btn" onclick="setSpeed(31557600)">1年/秒</button>
+  <button class="btn" onclick="resetView()">👁 視点リセット</button>
+  <span id="hint">ドラッグで回転・ピンチ/ホイールでズーム。※見やすいよう距離と大きさは調整しています（動く速さ＝自転・公転の周期は実際どおり）。</span>
+</div>
+
+<script>
+const CV = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas: CV, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding; // テクスチャの色を正しく
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 5000);
+const controls = new THREE.OrbitControls(camera, CV);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+
+// ===== 時間 =====
+const DAY = 86400e3; // ms
+let simMs = Date.now();          // シミュレーション時刻
+let speed = 86400;               // 実1秒あたりの経過（sim秒）
+let playing = true;
+function togglePlay(){ playing = !playing; document.getElementById('play').textContent = playing ? '⏸' : '▶'; }
+function setSpeed(s){ speed = s; } // ボタンのハイライトは下のリスナーで付け替え
+// スピードボタンのハイライト
+document.querySelectorAll('#bottom .btn').forEach(b=>{
+  if(/秒|リアル/.test(b.textContent)) b.addEventListener('click', ()=>{
+    document.querySelectorAll('#bottom .btn').forEach(x=>{ if(/秒|リアル/.test(x.textContent)) x.classList.remove('on'); });
+    b.classList.add('on');
+  });
+});
+
+// ===== ヘルパー =====
+const texLoader = new THREE.TextureLoader();
+function tex(path, srgb=true){
+  const t = texLoader.load(path);
+  if(srgb) t.encoding = THREE.sRGBEncoding; // 色テクスチャはsRGB、alphaMapはlinear(false)
+  t.anisotropy = 8;
+  return t;
+}
+function sphere(r, color, opts={}){
+  const map = opts.map || null;
+  const m = opts.emissive
+    ? new THREE.MeshBasicMaterial({ color: map?0xffffff:color, map })
+    : new THREE.MeshStandardMaterial({ color: map?0xffffff:color, map, roughness:opts.rough??0.85, metalness:0.0, emissive:opts.glow||0x000000, emissiveIntensity:opts.glowI||0 });
+  return new THREE.Mesh(new THREE.SphereGeometry(r, 64, 48), m);
+}
+// 環（テクスチャが半径方向に並ぶようUVを付け直す）
+function ringGeo(inner, outer){
+  const g = new THREE.RingGeometry(inner, outer, 96, 1);
+  const pos = g.attributes.position, uv = g.attributes.uv, v = new THREE.Vector3();
+  for(let i=0;i<pos.count;i++){ v.fromBufferAttribute(pos,i);
+    uv.setXY(i, (v.length()-inner)/(outer-inner), 0.5); }
+  return g;
+}
+function orbitRing(radius, color=0x33507a){
+  const seg=128, pts=[];
+  for(let i=0;i<=seg;i++){ const a=i/seg*Math.PI*2; pts.push(new THREE.Vector3(Math.cos(a)*radius,0,Math.sin(a)*radius)); }
+  const g=new THREE.BufferGeometry().setFromPoints(pts);
+  return new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.5 }));
+}
+function label(text, color='#eaf2ff', scale=1){
+  const cv=document.createElement('canvas'); const s=256; cv.width=s; cv.height=64;
+  const ctx=cv.getContext('2d'); ctx.font='bold 34px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  // 背景は透明のまま。可読性のため濃い縁取り＋本体色
+  ctx.lineWidth=7; ctx.lineJoin='round'; ctx.strokeStyle='rgba(0,0,0,0.85)'; ctx.strokeText(text, s/2, 34);
+  ctx.fillStyle=color; ctx.fillText(text, s/2, 34);
+  const tex=new THREE.CanvasTexture(cv);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, depthTest:false, transparent:true }));
+  sp.scale.set(9*scale, 2.25*scale, 1);
+  return sp;
+}
+const deg = d => d*Math.PI/180;
+
+// ===== 太陽・地球・月モード =====
+const earthGroup = new THREE.Group(); scene.add(earthGroup);
+let sunEM, earthPivot, earthTilt, earthMesh, moonPivot, moonMesh, japanDot;
+(function buildEarthMoon(){
+  // 太陽（中央・光源）実写テクスチャ
+  sunEM = sphere(3.2, 0xffd24a, { emissive:true, map: tex('tex/2k_sun.jpg') }); earthGroup.add(sunEM);
+  const sunLight = new THREE.PointLight(0xffffff, 2.4, 0, 0); earthGroup.add(sunLight);
+  earthGroup.add(new THREE.AmbientLight(0x223044, 0.45)); // 夜側もうっすら見える程度
+  earthGroup.add(label('太陽','#ffdf7a').translateY(4.8));
+
+  earthGroup.add(orbitRing(30, 0x3b6ea5)); // 地球の公転軌道
+
+  // 地球（自転軸を23.4°傾ける）実写テクスチャ＋雲
+  earthPivot = new THREE.Group(); earthGroup.add(earthPivot);
+  earthTilt = new THREE.Group(); earthTilt.rotation.z = deg(23.4); earthPivot.add(earthTilt);
+  earthMesh = sphere(1.25, 0xffffff, { rough:0.9, map: tex('tex/2k_earth_daymap.jpg') }); earthTilt.add(earthMesh);
+  const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.28,64,48),
+    new THREE.MeshStandardMaterial({ color:0xffffff, alphaMap: tex('tex/2k_earth_clouds.jpg', false), transparent:true, depthWrite:false, opacity:0.9 }));
+  earthMesh.add(clouds); // 雲も地球と一緒に自転
+  japanDot = new THREE.Mesh(new THREE.SphereGeometry(0.10,16,16), new THREE.MeshBasicMaterial({ color:0xff3b30 }));
+  // 日本の位置（緯度35,経度135相当を球面に）
+  const la=deg(35), lo=deg(135);
+  japanDot.position.set(1.25*Math.cos(la)*Math.cos(lo), 1.25*Math.sin(la), 1.25*Math.cos(la)*Math.sin(lo));
+  earthMesh.add(japanDot);
+  // 自転軸（見える棒）
+  const axis = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,3.4,8), new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.35 }));
+  earthTilt.add(axis);
+  const eLabel = label('地球','#a9d4ff'); eLabel.scale.set(6,1.5,1); eLabel.position.y=2.2; earthTilt.add(eLabel);
+
+  // 月（地球の周りを公転・自転同期）
+  moonPivot = new THREE.Group(); earthPivot.add(moonPivot);
+  earthPivot.add(orbitRing(4.2, 0x6a7a95).translateY(0)); // 月の公転軌道（地球中心）
+  moonMesh = sphere(0.34, 0xffffff, { rough:1.0, map: tex('tex/2k_moon.jpg') });
+  moonMesh.position.x = 4.2; moonPivot.add(moonMesh);
+  const mLabel = label('月','#e6e9f0'); mLabel.scale.set(4,1,1); mLabel.position.set(4.2,0.9,0); moonPivot.add(mLabel);
+})();
+
+// ===== 太陽系ぜんたいモード =====
+const solarGroup = new THREE.Group(); solarGroup.visible=false; scene.add(solarGroup);
+const planets = []; // {pivot, mesh, period, angle0}
+(function buildSolar(){
+  const sun = sphere(5, 0xffd24a, { emissive:true, map: tex('tex/2k_sun.jpg') }); solarGroup.add(sun);
+  solarGroup.add(new THREE.PointLight(0xffffff, 2.6, 0, 0));
+  solarGroup.add(new THREE.AmbientLight(0x445, 0.75));
+  const sl=label('太陽','#ffdf7a'); sl.position.y=7.5; solarGroup.add(sl);
+
+  // [名前, 表示軌道半径, 表示半径, テクスチャ, 公転周期(年), 開始角, 環]
+  const DATA = [
+    ['水星', 10, 0.7, '2k_mercury.jpg',         0.241, 0.2],
+    ['金星', 15, 1.1, '2k_venus_atmosphere.jpg',0.615, 1.1],
+    ['地球', 20, 1.2, '2k_earth_daymap.jpg',    1.000, 2.0],
+    ['火星', 26, 0.95,'2k_mars.jpg',            1.881, 3.3],
+    ['木星', 38, 3.0, '2k_jupiter.jpg',         11.86, 0.7],
+    ['土星', 50, 2.6, '2k_saturn.jpg',          29.46, 4.5, true],
+    ['天王星',61, 2.0, '2k_uranus.jpg',         84.01, 5.4],
+    ['海王星',71, 1.9, '2k_neptune.jpg',        164.8, 1.6],
+  ];
+  for(const [nm, R, pr, tf, per, a0, ring] of DATA){
+    solarGroup.add(orbitRing(R, 0x2f4a70));
+    const pivot = new THREE.Group(); solarGroup.add(pivot);
+    const mesh = sphere(pr, 0xffffff, { rough:0.9, map: tex('tex/'+tf) }); mesh.position.x = R; pivot.add(mesh);
+    if(ring){ // 土星の環（実写・半径方向UV）
+      const rg = new THREE.Mesh(ringGeo(pr*1.35, pr*2.3),
+        new THREE.MeshBasicMaterial({ map: tex('tex/2k_saturn_ring_alpha.png', false), color:0xffffff, side:THREE.DoubleSide, transparent:true }));
+      rg.rotation.x = deg(75); mesh.add(rg);
+    }
+    const lb = label(nm, '#dfeaff'); lb.scale.set(5,1.25,1); lb.position.set(R, pr+1.4, 0); pivot.add(lb);
+    planets.push({ pivot, mesh, period: per, a0 });
+  }
+})();
+
+// ===== モード切替 =====
+let mode = 'earth';
+const CAM = {
+  earth: { pos:new THREE.Vector3(0, 22, 55), target:new THREE.Vector3(28,0,0) },
+  solar: { pos:new THREE.Vector3(0, 70, 130), target:new THREE.Vector3(0,0,0) },
+};
+function setMode(m){
+  mode = m;
+  earthGroup.visible = m==='earth';
+  solarGroup.visible = m==='solar';
+  document.getElementById('mEarth').classList.toggle('on', m==='earth');
+  document.getElementById('mSolar').classList.toggle('on', m==='solar');
+  resetView();
+}
+function resetView(){
+  const c = CAM[mode];
+  camera.position.copy(c.pos); controls.target.copy(c.target); controls.update();
+}
+
+// ===== アニメーション =====
+const clock = new THREE.Clock();
+const EY = 365.256*DAY; // 地球公転(ms)
+function update(){
+  const dt = clock.getDelta();
+  if(playing) simMs += dt*1000*speed;
+
+  if(mode==='earth'){
+    // 地球の公転（太陽のまわり）。北から見て反時計回り＝Zは -sin
+    const eAng = (simMs/EY)*Math.PI*2;
+    earthPivot.position.set(Math.cos(eAng)*30, 0, -Math.sin(eAng)*30);
+    // 地球の自転（24時間）
+    earthMesh.rotation.y = (simMs/DAY)*Math.PI*2;
+    // 月の公転（27.32日）＋自転同期（常に同じ面を地球へ）
+    const mAng = (simMs/(27.322*DAY))*Math.PI*2;
+    moonPivot.rotation.y = mAng;
+    moonMesh.rotation.y = -mAng; // 公転を打ち消し＝地球に同じ面
+  } else {
+    const yr = simMs/EY; // 経過年
+    for(const p of planets){
+      const a = p.a0 + (yr/p.period)*Math.PI*2;
+      p.pivot.rotation.y = a;
+      p.mesh.rotation.y += 0.01; // 自転（見た目用）
+    }
+  }
+  // 日付表示
+  const d = new Date(simMs);
+  document.getElementById('date').textContent =
+    d.toLocaleDateString('ja-JP',{year:'numeric',month:'2-digit',day:'2-digit'}) + ' ' +
+    d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(update);
+}
+
+function resize(){
+  const w=innerWidth, h=innerHeight;
+  renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize(); setMode('earth'); update();
+</script>
+</body>
+</html>
