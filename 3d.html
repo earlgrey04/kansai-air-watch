@@ -13,31 +13,74 @@
   #hud { position:absolute; top:10px; left:10px; z-index:10; background:rgba(10,30,50,.8); color:#dfeaff;
          font:13px/1.5 -apple-system,"Hiragino Kaku Gothic ProN",sans-serif; padding:9px 12px; border-radius:10px; max-width:70vw; }
   #hud b { color:#7fc4ff; } #hud .cnt { font-size:18px; font-weight:800; color:#fff; }
-  #bar { position:absolute; top:10px; right:10px; z-index:10; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  #bar { position:absolute; top:10px; right:10px; z-index:10; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;
+         max-width:calc(100vw - 20px); box-sizing:border-box; }
   #bar button, #satbar button { font:13px sans-serif; padding:7px 11px; border:none; border-radius:8px; background:rgba(20,40,64,.85); color:#cfe0f5; }
   #bar button.on { background:#2563eb; color:#fff; font-weight:700; }
+  #bar .brk { display:none; } /* 改行用: PCは無効、スマホのみ2段目の前で改行 */
   #satbar { position:absolute; top:54px; right:10px; z-index:10; display:none; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
   #satbar button.on { background:#0f9d6b; color:#fff; font-weight:700; }
   #satbar button { opacity:.65; }
   #satbar button.on { opacity:1; }
+  /* 地震/火山 共通の期間バー（中身はモードで差し替え） */
+  #modebar { position:absolute; top:54px; right:10px; z-index:10; display:none; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  #modebar button { font:13px sans-serif; padding:7px 11px; border:none; border-radius:8px; background:rgba(20,40,64,.85); color:#cfe0f5; opacity:.72; }
+  #modebar button.on { background:#e8562a; color:#fff; font-weight:700; opacity:1; }
+  /* 雨雲タイムライン（実況→予測を再生）。左下のCesium再生ウィジェットとタイムラインを避けて配置 */
+  #wxbar { position:absolute; bottom:34px; left:120px; right:10px; z-index:10; display:none; align-items:center; gap:8px;
+           background:rgba(10,30,50,.9); padding:6px 10px; border-radius:10px; }
+  #wxbar button { font:14px sans-serif; padding:4px 11px; border:none; border-radius:8px; background:#2563eb; color:#fff; }
+  #wxbar input[type=range] { flex:1; min-width:80px; accent-color:#4aa3ff; }
+  #wxbar span { color:#dfeaff; font:12px sans-serif; min-width:104px; text-align:right; white-space:nowrap; }
   #err { position:absolute; bottom:34px; left:10px; z-index:10; color:#ff9b9b; font:12px monospace; background:rgba(0,0,0,.6); padding:4px 8px; border-radius:6px; display:none; }
+  /* ===== スマホ/タブレット: 上メニューの重なり／右はみ出し対策 ===== */
+  @media (max-width: 820px){
+    /* ボタンバー: 画面幅いっぱい＋“折り返し”。折り返しは横にはみ出さない（雨雲ボタンも収まる） */
+    #bar { top:8px; left:8px; right:8px; gap:5px; flex-wrap:wrap; justify-content:flex-start; overflow:visible; }
+    #bar button, #satbar button, #modebar button { font-size:11px; padding:5px 9px; white-space:nowrap; }
+    #bar .brk { display:block; flex-basis:100%; width:100%; height:0; } /* 2段目の前で改行 */
+    /* HUD はバー(最大2段)の下へ */
+    #hud { top:92px; left:8px; max-width:70vw; font-size:10px; line-height:1.35; padding:5px 8px; }
+    #hud .cnt { font-size:14px; }
+    /* 衛星カテゴリ／地震期間バー: 下部・折り返し（各モード時のみ） */
+    #satbar, #modebar { top:auto; bottom:70px; left:8px; right:8px; gap:5px; flex-wrap:wrap; justify-content:flex-start; }
+    /* 雨雲タイムライン: 下部フル幅 */
+    #wxbar { left:8px; right:8px; bottom:30px; gap:6px; }
+    #wxbar span { min-width:0; font-size:11px; }
+    #wxbar button { padding:4px 9px; }
+  }
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v27-jma-rain</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v34-esri-default</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
   <button onclick="setReplay(3)">🕒 3時間</button>
   <button onclick="setReplay(6)">🕕 6時間</button>
-  <button onclick="setSatellites()">🛰️ 衛星</button>
+  <div class="brk"></div>
   <button id="bWx" onclick="toggleWeather()">☁️ 雨雲</button>
+  <button id="bLtn" onclick="toggleLightning()">⚡ 雷</button>
+  <button id="bEq" onclick="setQuakes()">🌏 地震</button>
+  <button id="bVol" onclick="setVolcanoes()">🌋 火山</button>
+  <button id="bPlate" onclick="setPlates()">🗺️ プレート</button>
+  <button id="bSST" onclick="setSST()">🌡️ 水温</button>
+  <button onclick="setSatellites()">🛰️ 衛星</button>
+  <button id="bModis" onclick="setSatPhoto('modis')">📷 MODIS</button>
+  <button id="bEsri" onclick="setSatPhoto('esri')">🌐 Esri</button>
+  <button onclick="location.href='solar.html'">🪐 天体</button>
 </div>
 <div id="satbar">
   <button id="tStar" class="on" onclick="toggleSat('star')">Starlink</button>
   <button id="tISS" class="on" onclick="toggleSat('iss')">ISS/ステーション</button>
   <button id="tOther" class="on" onclick="toggleSat('other')">その他</button>
+</div>
+<div id="modebar"></div>
+<div id="wxbar">
+  <button id="wxPlay" onclick="wxTogglePlay()">▶</button>
+  <input id="wxSlider" type="range" min="0" max="0" value="0" oninput="wxSeek(this.value)" />
+  <span id="wxTime">–</span>
 </div>
 <div id="err"></div>
 <script>
@@ -86,41 +129,164 @@ const viewer = new Cesium.Viewer("cesiumContainer", {
   animation:true, timeline:true, infoBox:true, selectionIndicator:true,
 });
 viewer.scene.globe.enableLighting = false;  // 太陽依存の陰影オフ（夜でも暗くならない）
-// 気象（雨雲：気象庁 高解像度降水ナウキャスト hrpns・日本・ズーム10）
-let weatherOn=false, weatherBase=null, weatherValid=null, curBasemap='light';
-async function loadWeatherFrame(){
-  try{
-    const idx=await (await fetch("https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json")).json();
-    const f=idx.find(e=>e.basetime===e.validtime)||idx[0]; // 観測（現在）を優先
-    weatherBase=f.basetime; weatherValid=f.validtime;
-    return !!weatherBase;
-  }catch(e){ return false; }
+// ===== 気象（雨雲アニメ：気象庁の“予測”タイルを時系列で動かす）=====
+// nowc/N1=実況(5分) / nowc/N2=予測(5分,〜60分) / rasrf=降水短時間予報(1時間,〜15h)
+let weatherOn=false, curBasemap='light';
+let satPhoto='esri'; // 衛星写真ベースマップ既定=Esri高解像実写（null=地図 / 'modis'=日次真彩色）
+function refreshPhotoButtons(){ // モード切替でボタンonが消えるので実写ボタンの状態を再適用
+  const m=document.getElementById('bModis'), e=document.getElementById('bEsri');
+  if(m) m.classList.toggle('on', satPhoto==='modis');
+  if(e) e.classList.toggle('on', satPhoto==='esri');
 }
-// 地図テーマ切替＋雨雲レイヤー：飛行機モード=明るいVoyager / 衛星モード=暗い地図
-function setBasemap(mode){
-  curBasemap=mode;
-  viewer.imageryLayers.removeAll();
-  const url = mode==='dark'
-    ? "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
-    : "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
-  viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-    url, credit:"© CARTO © OpenStreetMap contributors", maximumLevel:19 }));
-  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(mode==='dark'?"#050a12":"#cfe1ef");
-  // 雨雲を上に重ねる（衛星モード以外・ON時のみ）＝気象庁 高解像度降水ナウキャスト
-  if(weatherOn && mode!=='dark' && weatherBase){
-    const wl=viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-      url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/${weatherBase}/none/${weatherValid}/surf/hrpns/{z}/{x}/{y}.png`,
-      maximumLevel:10, credit:"気象庁ナウキャスト" }));
-    wl.alpha=0.75;
-  }
-}
-async function toggleWeather(){
-  weatherOn=!weatherOn;
-  const b=document.getElementById('bWx'); if(b)b.classList.toggle('on',weatherOn);
-  if(weatherOn){ setErr("雨雲取得中…"); const ok=await loadWeatherFrame(); setErr(ok?null:"雨雲取得失敗"); }
+function gibsDate(){ const d=new Date(Date.now()-24*3600e3); return d.toISOString().slice(0,10); } // 前日UTC（GIBS配信済み）
+// 実写ベースマップ: MODIS / Esri を個別トグル（もう一度押すと地図に戻る・相互排他）
+function setSatPhoto(kind){
+  satPhoto = (satPhoto===kind) ? null : kind;
+  const m=document.getElementById('bModis'), e=document.getElementById('bEsri');
+  if(m) m.classList.toggle('on', satPhoto==='modis');
+  if(e) e.classList.toggle('on', satPhoto==='esri');
   setBasemap(curBasemap);
 }
-setInterval(()=>{ if(weatherOn){ loadWeatherFrame().then(ok=>{ if(ok)setBasemap(curBasemap); }); } }, 5*60*1000); // 5分毎に更新
+let wxLayers={}, wxFrames=[], wxIndex=0, wxTimer=null; // wxLayers: idx→ImageryLayer（生成後キャッシュ＝チカチカ防止）
+let lightningOn=false, lightningLayer=null, lightningTimer=null; // 雷ナウキャスト(thns)重畳
+let busyToggle=false; // 雨雲/雷トグルの非同期処理中フラグ（連打レース防止）
+let wxFramesCache=null, wxFramesCacheT=0; // buildWeatherFrames の短期キャッシュ
+const JMA="https://www.jma.go.jp/bosai/jmatile/data";
+// "YYYYMMDDHHmmss"(UTC) → epoch ms
+function jmaMs(s){ return Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8),+s.slice(8,10),+s.slice(10,12),+(s.slice(12,14)||0)); }
+function jstLabel(ms){ return new Date(ms).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+async function fetchTT(u){ try{ return await (await fetch(u)).json(); }catch(e){ return []; } }
+
+// 実況30分＋予測(5分×〜60分＋1時間×〜15h)のフレーム列を作る
+async function buildWeatherFrames(){
+  if(wxFramesCache && Date.now()-wxFramesCacheT < 60000) return wxFramesCache; // 60秒キャッシュ（再表示を高速化）
+  const [n1,n2,ra]=await Promise.all([
+    fetchTT(`${JMA}/nowc/targetTimes_N1.json`),
+    fetchTT(`${JMA}/nowc/targetTimes_N2.json`),
+    fetchTT(`${JMA}/rasrf/targetTimes.json`),
+  ]);
+  const now=Date.now(), fr=[];
+  for(const e of n1){ const t=jmaMs(e.validtime); if(t>=now-30*60000) fr.push({base:e.basetime,valid:e.validtime,path:'nowc',prod:'hrpns',max:14,t,kind:'obs'}); }
+  let maxN2=0;
+  for(const e of n2){ const t=jmaMs(e.validtime); maxN2=Math.max(maxN2,t); fr.push({base:e.basetime,valid:e.validtime,path:'nowc',prod:'hrpns',max:14,t,kind:'fcst'}); }
+  if(ra.length){
+    // rasrf は 0-6h と 7-15h を別 basetime で段階配信し、最新 run はタイル生成が遅れて404のことがある。
+    // 各予測時刻(validtime)ごとに、新しい basetime から順に「タイルが実在(公開済み)する run」を採用して
+    // run をまたいで連続させる（発表待ちの時刻は自動で除外→10分毎の再構築で埋まる）。
+    const cand={};
+    for(const e of ra){ (cand[e.validtime]=cand[e.validtime]||new Set()).add(e.basetime); }
+    const futVs=Object.keys(cand).filter(v=>jmaMs(v)>maxN2+60000);
+    const picked=await Promise.all(futVs.map(async (v)=>{
+      for(const b of [...cand[v]].sort().reverse().slice(0,4)){ // 新しい順に最大4run試す
+        try{ const r=await fetch(`${JMA}/rasrf/${b}/none/${v}/surf/rasrf/6/56/25.png`,{cache:'no-store'}); if(r.ok) return {base:b,valid:v,path:'rasrf',prod:'rasrf',max:8,t:jmaMs(v),kind:'fcst'}; }catch(e){}
+      }
+      return null;
+    }));
+    for(const p of picked) if(p) fr.push(p);
+  }
+  fr.sort((a,b)=>a.t-b.t);
+  const seen=new Set(), out=[]; for(const f of fr){ if(!seen.has(f.t)){ seen.add(f.t); out.push(f); } }
+  wxFramesCache=out; wxFramesCacheT=Date.now();
+  return out;
+}
+// フレーム i のレイヤーを（無ければ）生成してキャッシュ。maximumLevel はプロダクト別。
+function ensureWxLayer(i){
+  if(wxLayers[i]) return wxLayers[i];
+  const f=wxFrames[i];
+  const L=viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+    url:`${JMA}/${f.path}/${f.base}/none/${f.valid}/surf/${f.prod}/{z}/{x}/{y}.png`, maximumLevel:f.max, credit:"気象庁" }));
+  L.show=false; L.alpha=0;
+  wxLayers[i]=L; return L;
+}
+function clearWxLayers(){ for(const k in wxLayers){ try{ viewer.imageryLayers.remove(wxLayers[k],true); }catch(e){} } wxLayers={}; }
+const WX_PREFETCH=3; // 先読みフレーム数（順再生でタイルを先に読ませて切替を無瞬断に）
+// 指定フレームを表示：alpha切替のみ＝チカチカしない。前方 WX_PREFETCH 枚を show=true で先読み、他は show=false（描画負荷ゼロ）
+function showWeatherFrame(i){
+  if(!weatherOn || curBasemap==='dark' || !wxFrames.length) return;
+  wxIndex=((i%wxFrames.length)+wxFrames.length)%wxFrames.length;
+  const win=new Set(); for(let k=0;k<=WX_PREFETCH;k++) win.add((wxIndex+k)%wxFrames.length);
+  for(const k in wxLayers){ if(!win.has(+k)){ wxLayers[k].show=false; wxLayers[k].alpha=0; } } // ウィンドウ外は非表示
+  for(const ki of win){ const L=ensureWxLayer(ki); L.show=true; L.alpha=(ki===wxIndex?0.82:0); } // 現在=表示 / 先読み=透明で読み込みだけ
+  const f=wxFrames[wxIndex];
+  const sl=document.getElementById('wxSlider'); if(sl){ sl.max=wxFrames.length-1; sl.value=wxIndex; }
+  const lb=document.getElementById('wxTime'); if(lb) lb.textContent=(f.kind==='obs'?'実況 ':'予測 ')+jstLabel(f.t);
+}
+function wxPlay(){ if(wxTimer)return; const b=document.getElementById('wxPlay'); if(b)b.textContent='⏸'; wxTimer=setInterval(()=>showWeatherFrame(wxIndex+1),750); }
+function wxPause(){ if(wxTimer){clearInterval(wxTimer);wxTimer=null;} const b=document.getElementById('wxPlay'); if(b)b.textContent='▶'; }
+function wxTogglePlay(){ wxTimer?wxPause():wxPlay(); }
+function wxSeek(v){ wxPause(); showWeatherFrame(+v); }
+
+// 地図テーマ切替：飛行機モード=明るいVoyager / 衛星モード=暗い地図。雨雲ONなら現フレームを上に復元
+function setBasemap(mode){
+  curBasemap=mode;
+  clearNewModes(); // プレート/水温の後始末を全遷移で一本化
+  viewer.imageryLayers.removeAll(); wxLayers={}; lightningLayer=null;
+  if(satPhoto==='modis'){
+    // NASA GIBS MODIS Terra 真彩色（前日・全球・その日の雲つき衛星写真）
+    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url:`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${gibsDate()}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
+      maximumLevel:9, credit:"NASA EOSDIS GIBS / MODIS" }));
+    viewer.scene.globe.baseColor = Cesium.Color.BLACK;
+  } else if(satPhoto==='esri'){
+    // Esri World Imagery（超高解像の実写）
+    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url:"https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      maximumLevel:19, credit:"Esri, Maxar, Earthstar Geographics" }));
+    viewer.scene.globe.baseColor = Cesium.Color.BLACK;
+  } else {
+    const url = mode==='dark'
+      ? "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+      : "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
+    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url, credit:"© CARTO © OpenStreetMap contributors", maximumLevel:19 }));
+    viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(mode==='dark'?"#050a12":"#cfe1ef");
+  }
+  if(weatherOn && mode!=='dark' && wxFrames.length) showWeatherFrame(wxIndex);
+  if(lightningOn && mode!=='dark') loadLightning(); // 雷ナウキャストを上に復元
+}
+// ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
+var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null;
+function clearNewModes(){
+  if(plateBoundarySrc){ try{ viewer.dataSources.remove(plateBoundarySrc,true); }catch(_){} plateBoundarySrc=null; }
+  if(plateVecEnts && plateVecEnts.length){ for(const e of plateVecEnts){ try{ viewer.entities.remove(e); }catch(_){} } }
+  plateVecEnts=[];
+  if(sstLayer){ try{ viewer.imageryLayers.remove(sstLayer); }catch(_){} sstLayer=null; }
+}
+// 雨雲アニメ ON/OFF。ON中はライブ機を止めて雨雲に集中、OFFでライブへ戻す
+async function toggleWeather(){
+  if(busyToggle) return;          // 読み込み中の連打を無視（レースで表示が消えるのを防止）
+  busyToggle=true;
+  try{
+    weatherOn=!weatherOn;
+    const b=document.getElementById('bWx');
+    const bar=document.getElementById('wxbar');
+    if(weatherOn){
+      // ライブ/リプレイの機体を止めて消す（雨雲モード。空港は残す）
+      if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+      quakesOff(); lightningOff(); volcanoesOff();
+      viewer.clock.shouldAnimate=false; clearAll(); planes={};
+      document.querySelectorAll('#bar button').forEach(x=>x.classList.remove('on')); refreshPhotoButtons(); if(b)b.classList.add('on');
+      setModeLbl("雨雲"); const c=document.getElementById('cnt'); if(c)c.textContent='☔';
+      setErr("雨雲予測を取得中…");
+      wxFrames=await buildWeatherFrames();
+      if(!wxFrames.length){ setErr("雨雲データ取得失敗"); weatherOn=false; if(b)b.classList.remove('on'); setLive(); return; }
+      setErr(null); if(bar)bar.style.display='flex';
+      const now=Date.now(); let idx=wxFrames.findIndex(f=>f.t>=now); if(idx<0) idx=wxFrames.length-1;
+      showWeatherFrame(idx); wxPlay();
+    } else {
+      weatherOff();
+      setLive(); // 雨雲を切ったらライブに戻す
+    }
+  } finally { busyToggle=false; }
+}
+function weatherOff(){
+  weatherOn=false; wxPause();
+  const b=document.getElementById('bWx'); if(b)b.classList.remove('on');
+  const bar=document.getElementById('wxbar'); if(bar)bar.style.display='none';
+  clearWxLayers();
+}
+// JMAは随時更新。ONの間は10分毎にフレーム列を作り直す
+setInterval(()=>{ if(weatherOn){ buildWeatherFrames().then(f=>{ if(f.length){ wxFrames=f; clearWxLayers(); showWeatherFrame(Math.min(wxIndex,f.length-1)); } }); } }, 10*60*1000);
 setBasemap('light');
 // ※3D地形（国土地理院DEM）は一旦無効化（描画不具合の切り分け中）。平面地図で動作を確認する。
 // try { viewer.terrainProvider = gsiTerrain(); } catch(e){ setErr("地形適用スキップ: "+(e&&e.message||e)); }
@@ -194,10 +360,12 @@ function addAirports(){
               disableDepthTestDistance:Number.POSITIVE_INFINITY } });
   }
 }
-function clearAll(){ viewer.entities.removeAll(); addAirports(); }
+function clearAll(){ clearNewModes(); viewer.entities.removeAll(); addAirports(); }
 
 // ===== LIVE =====（位置=最新の定数、向き=trackから直接。差分なし）
 let liveTimer=null, planes={};
+// ライブ機体だけ消す（空港マーカーは残す）＝雨雲モードで使用
+function clearLivePlanes(){ for(const h in planes){ viewer.entities.remove(planes[h].ent); viewer.entities.remove(planes[h].line); } planes={}; }
 let starCollection=null, starRecs=[], starTimer=null;  // Starlink全機用（高速点描画）
 function clearStarlink(){ if(starTimer){clearInterval(starTimer);starTimer=null;} if(starCollection){viewer.scene.primitives.remove(starCollection);starCollection=null;} starRecs=[]; const sb=document.getElementById('satbar'); if(sb)sb.style.display='none'; }
 // 衛星カテゴリ表示切替（Starlink / ISS・ステーション / その他）
@@ -242,8 +410,10 @@ async function pollLive(){
 }
 function kansaiView(){ viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(135.44,34.02,46000), orientation:{heading:0,pitch:Cesium.Math.toRadians(-27),roll:0}, duration:1.2 }); }
 function setLive(){
-  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
-  document.getElementById('bLive').classList.add('on'); setModeLbl("LIVE");
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff(); // ライブに入るときは雨雲/地震/雷モードを抜ける
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on')); refreshPhotoButtons();
+  document.getElementById('bLive').classList.add('on');
+  setModeLbl("LIVE");
   clearStarlink(); setBasemap('light');
   viewer.clock.shouldAnimate=false;
   clearAll(); planes={};
@@ -273,7 +443,8 @@ async function loadFrames(hoursBack){
 }
 async function setReplay(hoursBack){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
-  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff(); // リプレイに入るときは各モードを抜ける
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on')); refreshPhotoButtons();
   if(window.event&&event.target)event.target.classList.add('on'); setModeLbl("REPLAY "+hoursBack+"h");
   clearStarlink(); setBasemap('light'); kansaiView();
   setErr("履歴を読み込み中…"); clearAll();
@@ -359,8 +530,9 @@ function thin(arr, cap){ if(arr.length<=cap) return arr; const step=Math.ceil(ar
 
 async function setSatellites(){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
-  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on')); refreshPhotoButtons();
   if(window.event&&event.target)event.target.classList.add('on'); setModeLbl("SATELLITE");
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();  // 衛星モードでは雨雲/地震/雷を止める（暗い地図）
   setBasemap('dark');  // 暗い地球＝衛星が際立つ
   setErr("軌道データ取得中…（Starlink含む・十数秒かかることがあります）"); viewer.entities.removeAll(); clearStarlink();
   const posProp=rec=>new Cesium.CallbackProperty((time)=>satPos(rec,Cesium.JulianDate.toDate(time)),false);
@@ -426,6 +598,270 @@ async function setSatellites(){
   document.getElementById('cnt').textContent=satEnt.iss.length+satEnt.other.length+starRecs.length;
   document.getElementById('upd').textContent=counts.join(" / ")+"（右上でカテゴリ切替）";
   setErr(starRecs.length?null:"Starlink取得失敗。数分後に🛰️再クリックで復帰");
+}
+
+// ===== 地震（USGS リアルタイム・全球）=====
+let eqEntities=[], eqTimer=null, eqFeed='all_day';
+const EQ_LABEL={ 'all_day':'24時間', '2.5_week':'1週間(M2.5+)', '4.5_month':'30日(M4.5+)' };
+function quakesOff(){ if(eqTimer){clearInterval(eqTimer);eqTimer=null;} const b=document.getElementById('modebar'); if(b)b.style.display='none'; const btn=document.getElementById('bEq'); if(btn)btn.classList.remove('on'); }
+function clearQuakes(){ for(const e of eqEntities) viewer.entities.remove(e); eqEntities=[]; }
+// 深さ→色（浅い=赤 / 中=黄緑 / 深い=青）
+function depthColor(km){ const h=Math.min(240, Math.max(0,km)/600*240); return Cesium.Color.fromHsl(h/360, 0.95, 0.55, 1.0); }
+function jstFull(ms){ return new Date(ms).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}); }
+async function loadQuakes(){
+  try{
+    const j=await (await fetch(`https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${eqFeed}.geojson`,{cache:'no-store'})).json();
+    clearQuakes();
+    const feats=j.features||[];
+    for(const f of feats){
+      const p=f.properties, g=f.geometry&&f.geometry.coordinates; if(!g) continue;
+      const lon=g[0], lat=g[1], depth=g[2]; const mag=(p.mag==null?1:p.mag);
+      const ent=viewer.entities.add({
+        // 地表の少し上に配置し、深度テストは有効のまま＝地球儀の裏側の震源は隠れる（透けない）
+        position:Cesium.Cartesian3.fromDegrees(lon,lat,20000),
+        point:{ pixelSize:Math.max(4, Math.min(28, mag*3)), color:depthColor(depth),
+                outlineColor:Cesium.Color.BLACK, outlineWidth:1 },
+        label: mag>=4.5 ? { text:'M'+mag.toFixed(1), font:'bold 11px sans-serif', pixelOffset:new Cesium.Cartesian2(0,-14),
+                fillColor:Cesium.Color.WHITE, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3, outlineColor:Cesium.Color.BLACK,
+                distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, 2.6e7) } : undefined,
+        description:`<table><tr><td>規模</td><td><b>M${mag}</b></td></tr><tr><td>場所</td><td>${p.place||'-'}</td></tr>`+
+          `<tr><td>深さ</td><td>${depth} km</td></tr><tr><td>時刻</td><td>${jstFull(p.time)}</td></tr></table>`,
+      });
+      eqEntities.push(ent);
+    }
+    document.getElementById('cnt').textContent=feats.length;
+    document.getElementById('upd').textContent=`${EQ_LABEL[eqFeed]}・${feats.length}件（色=深さ 浅赤→深青 / 大きさ=規模）`;
+    setErr(null);
+  }catch(e){ setErr('地震データ取得失敗: '+(e&&e.message||e)); }
+}
+function setQuakes(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on')); refreshPhotoButtons();
+  const btn=document.getElementById('bEq'); if(btn)btn.classList.add('on');
+  setModeLbl('地震'); clearStarlink(); setBasemap('dark');
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); eqEntities=[];  // 全球ビュー（空港は非表示）
+  document.getElementById('modebar').innerHTML =
+    `<button class="${eqFeed==='all_day'?'on':''}" onclick="setEqFeed('all_day')">24時間</button>`+
+    `<button class="${eqFeed==='2.5_week'?'on':''}" onclick="setEqFeed('2.5_week')">1週間</button>`+
+    `<button class="${eqFeed==='4.5_month'?'on':''}" onclick="setEqFeed('4.5_month')">M4.5+</button>`;
+  document.getElementById('modebar').style.display='flex';
+  setErr("震源データ取得中…");
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(145,20,1.8e7), duration:1.5 });
+  loadQuakes(); if(eqTimer)clearInterval(eqTimer); eqTimer=setInterval(loadQuakes, 180000); // 3分毎に更新
+}
+function setEqFeed(feed){
+  eqFeed=feed;
+  document.querySelectorAll('#modebar button').forEach(b=>b.classList.remove('on'));
+  if(window.event&&event.target)event.target.classList.add('on');
+  setErr("震源データ取得中…"); loadQuakes();
+}
+
+// ===== 雷（気象庁 雷ナウキャスト thns を重畳。ライブに重ねる）=====
+function lightningOff(){
+  lightningOn=false;
+  if(lightningTimer){ clearInterval(lightningTimer); lightningTimer=null; }
+  if(lightningLayer){ viewer.imageryLayers.remove(lightningLayer); lightningLayer=null; }
+  const b=document.getElementById('bLtn'); if(b)b.classList.remove('on');
+}
+async function loadLightning(){
+  try{
+    const idx=await (await fetch(`${JMA}/nowc/targetTimes_N1.json`,{cache:'no-store'})).json();
+    const f=idx[0]; // 最新実況
+    const nl=viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url:`${JMA}/nowc/${f.basetime}/none/${f.validtime}/surf/thns/{z}/{x}/{y}.png`, maximumLevel:8, credit:"気象庁 雷ナウキャスト" }));
+    nl.alpha=0.9; const old=lightningLayer; lightningLayer=nl; if(old) viewer.imageryLayers.remove(old);
+    setErr(null);
+  }catch(e){ setErr('雷データ取得失敗'); }
+}
+async function toggleLightning(){
+  if(busyToggle) return;          // 読み込み中の連打を無視
+  busyToggle=true;
+  try{
+    lightningOn=!lightningOn;
+    const b=document.getElementById('bLtn');
+    if(lightningOn){
+      // 雷モード: ライブ/リプレイの機体を止めて消す（雨雲と同じ挙動。空港は残す）
+      if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+      weatherOff(); quakesOff(); volcanoesOff();
+      viewer.clock.shouldAnimate=false; clearAll(); planes={};
+      document.querySelectorAll('#bar button').forEach(x=>x.classList.remove('on')); refreshPhotoButtons(); if(b)b.classList.add('on');
+      setModeLbl('雷'); const c=document.getElementById('cnt'); if(c)c.textContent='⚡';
+      setErr('雷ナウキャスト取得中…');
+      if(curBasemap!=='light') setBasemap('light'); // lightningOn=true なので setBasemap が thns も追加
+      else await loadLightning();
+      if(lightningTimer)clearInterval(lightningTimer); lightningTimer=setInterval(loadLightning,180000); // 3分毎
+    } else {
+      lightningOff();
+      setLive(); // 雷を切ったらライブに戻す
+    }
+  } finally { busyToggle=false; }
+}
+
+// ===== 火山（スミソニアン GVP 同梱データ・全球）=====
+let volcanoEntities=[], volcanoData=null, volFilter=0; // volFilter: 0=全て / それ以外=最終噴火がその年以降
+function volcanoesOff(){ const b=document.getElementById('modebar'); if(b)b.style.display='none'; const btn=document.getElementById('bVol'); if(btn)btn.classList.remove('on'); }
+function setVolFilter(year){
+  volFilter=year;
+  document.querySelectorAll('#modebar button').forEach(b=>b.classList.remove('on'));
+  if(window.event&&event.target)event.target.classList.add('on');
+  loadVolcanoes();
+}
+async function loadVolcanoes(){
+  try{
+    if(!volcanoData) volcanoData=await (await fetch('volcanoes.json')).json();
+    for(const e of volcanoEntities) viewer.entities.remove(e); volcanoEntities=[];
+    let recent=0;
+    for(const v of volcanoData){
+      const y=(typeof v.e==='number')?v.e:null;
+      if(volFilter && !(y!=null && y>=volFilter)) continue; // 期間フィルタ（噴火年が不明の火山も除外）
+      const col = (y!=null&&y>=2000) ? Cesium.Color.fromCssColorString('#ff3b30')
+               : (y!=null&&y>=1900) ? Cesium.Color.fromCssColorString('#ff9f0a')
+               : Cesium.Color.fromCssColorString('#b08968');
+      const size = (y!=null&&y>=2000) ? 8 : (y!=null&&y>=1900 ? 6 : 4);
+      if(y!=null&&y>=2000) recent++;
+      const ent=viewer.entities.add({
+        position:Cesium.Cartesian3.fromDegrees(v.lon,v.lat,20000), // 地表少し上＝裏側は隠れる
+        point:{ pixelSize:size, color:col, outlineColor:Cesium.Color.BLACK, outlineWidth:1 },
+        label: (y!=null&&y>=2015) ? { text:v.n, font:'11px sans-serif', pixelOffset:new Cesium.Cartesian2(0,-12),
+                fillColor:Cesium.Color.WHITE, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3, outlineColor:Cesium.Color.BLACK,
+                distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, 4.0e6) } : undefined,
+        description:`<table><tr><td>火山</td><td><b>${v.n}</b></td></tr><tr><td>型</td><td>${v.t||'-'}</td></tr>`+
+          `<tr><td>国</td><td>${v.c||'-'}</td></tr><tr><td>最終噴火</td><td>${v.e!=null?v.e:'不明'}</td></tr>`+
+          `<tr><td>標高</td><td>${v.el!=null?v.el+' m':'-'}</td></tr></table>`,
+      });
+      volcanoEntities.push(ent);
+    }
+    const shown=volcanoEntities.length;
+    const range = volFilter===0 ? '全期間' : `${volFilter}年以降の噴火`;
+    document.getElementById('cnt').textContent=shown;
+    document.getElementById('upd').textContent=`火山 ${shown}（${range}）赤=2000年〜 ${recent} / 橙=20世紀 / 茶=それ以前`;
+    setErr(null);
+  }catch(e){ setErr('火山データ取得失敗: '+(e&&e.message||e)); }
+}
+function setVolcanoes(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on')); refreshPhotoButtons();
+  const btn=document.getElementById('bVol'); if(btn)btn.classList.add('on');
+  setModeLbl('火山'); clearStarlink(); setBasemap('dark');
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); volcanoEntities=[];
+  document.getElementById('modebar').innerHTML =
+    `<button class="${volFilter===0?'on':''}" onclick="setVolFilter(0)">全て</button>`+
+    `<button class="${volFilter===1900?'on':''}" onclick="setVolFilter(1900)">1900年〜</button>`+
+    `<button class="${volFilter===2000?'on':''}" onclick="setVolFilter(2000)">2000年〜</button>`;
+  document.getElementById('modebar').style.display='flex'; // 期間バー表示
+  setErr('火山データ読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(145,20,1.8e7), duration:1.5 });
+  loadVolcanoes();
+}
+
+// ===== プレート境界＋運動ベクトル（地殻の動き・歪み）=====
+// 境界線=Peter Bird(2002) 実データ / 運動ベクトル=NNR-MORVEL56モデルをEuler極から解析計算
+// [和名, [Euler極緯度, 経度, 角速度°/百万年], 代表点[[緯,経],...]]
+const PLATES=[
+  ['太平洋',   [-63.58,114.70,0.651], [[0,-140],[-25,-125],[35,-170]]],
+  ['北米',     [ -4.85,-80.64,0.209], [[45,-100]]],
+  ['南米',     [-22.62,-112.83,0.109],[[-15,-60]]],
+  ['ユーラシア',[ 48.85,-106.50,0.223],[[52,90]]],
+  ['アフリカ', [ 47.68,-68.44,0.292], [[2,22]]],
+  ['オーストラリア',[33.86,37.94,0.632],[[-25,133]]],
+  ['南極',     [ 65.42,-118.11,0.250],[[-72,45]]],
+  ['ナスカ',   [ 46.23,-101.06,0.696],[[-20,-90]]],
+  ['インド',   [ 50.37,-3.29,0.544],  [[16,76]]],
+  ['アラビア', [ 48.88,-8.49,0.559],  [[24,45]]],
+  ['フィリピン海',[-46.02,-31.36,0.910],[[16,132]]],
+  ['ココス',   [ 26.93,-124.31,1.198],[[7,-92]]],
+  ['カリブ',   [ 35.20,-92.62,0.286], [[14,-73]]],
+];
+function llVec(latD, lonD){ const la=Cesium.Math.toRadians(latD), lo=Cesium.Math.toRadians(lonD);
+  return [Math.cos(la)*Math.cos(lo), Math.cos(la)*Math.sin(lo), Math.sin(la)]; }
+// Euler極からその地点の速度（cm/年）と進行方位（rad, 北基準時計回り）を求める
+function plateVel(pole, latD, lonD){
+  const P=llVec(pole[0],pole[1]), r=llVec(latD,lonD);
+  const c=[P[1]*r[2]-P[2]*r[1], P[2]*r[0]-P[0]*r[2], P[0]*r[1]-P[1]*r[0]]; // P×r（|c|=sinθ）
+  const la=Cesium.Math.toRadians(latD), lo=Cesium.Math.toRadians(lonD);
+  const east=[-Math.sin(lo),Math.cos(lo),0];
+  const north=[-Math.sin(la)*Math.cos(lo),-Math.sin(la)*Math.sin(lo),Math.cos(la)];
+  const vE=c[0]*east[0]+c[1]*east[1]+c[2]*east[2];
+  const vN=c[0]*north[0]+c[1]*north[1]+c[2]*north[2];
+  const sinT=Math.hypot(c[0],c[1],c[2]);
+  return { speed:11.12*pole[2]*sinT, az:Math.atan2(vE,vN) }; // 11.12=R·(π/180)/1e6 換算(cm/年)
+}
+// 始点から方位az・距離distKmの地点（球面）
+function destLL(latD, lonD, az, distKm){
+  const R=6371, d=distKm/R, la1=Cesium.Math.toRadians(latD), lo1=Cesium.Math.toRadians(lonD);
+  const la2=Math.asin(Math.sin(la1)*Math.cos(d)+Math.cos(la1)*Math.sin(d)*Math.cos(az));
+  const lo2=lo1+Math.atan2(Math.sin(az)*Math.sin(d)*Math.cos(la1), Math.cos(d)-Math.sin(la1)*Math.sin(la2));
+  return [Cesium.Math.toDegrees(la2), Cesium.Math.toDegrees(lo2)];
+}
+async function loadPlateBoundaries(){
+  try{
+    if(plateBoundarySrc){ viewer.dataSources.remove(plateBoundarySrc,true); plateBoundarySrc=null; }
+    const src=await Cesium.GeoJsonDataSource.load(
+      'https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json',
+      { clampToGround:false });
+    for(const e of src.entities.values){ if(e.polyline){
+      e.polyline.width=2.5; e.polyline.material=Cesium.Color.fromCssColorString('#ffb340').withAlpha(0.95); } }
+    plateBoundarySrc=src; viewer.dataSources.add(src);
+  }catch(e){ setErr('プレート境界の取得失敗: '+(e&&e.message||e)); }
+}
+function buildPlateVectors(){
+  const K=140, col=Cesium.Color.fromCssColorString('#28e0d0'); // K=km/(cm/年) 矢印長スケール
+  for(const [name,pole,pts] of PLATES){
+    for(const [lat,lon] of pts){
+      const {speed,az}=plateVel(pole,lat,lon); if(speed<0.05) continue;
+      const [la2,lo2]=destLL(lat,lon,az, speed*K);
+      const start=Cesium.Cartesian3.fromDegrees(lon,lat,30000);
+      const end=Cesium.Cartesian3.fromDegrees(lo2,la2,30000);
+      plateVecEnts.push(viewer.entities.add({ polyline:{ positions:[start,end], width:9,
+        material:new Cesium.PolylineArrowMaterialProperty(col), arcType:Cesium.ArcType.GEODESIC } }));
+      plateVecEnts.push(viewer.entities.add({ position:start,
+        point:{ pixelSize:5, color:col, outlineColor:Cesium.Color.BLACK, outlineWidth:1 },
+        label:{ text:`${name} ${speed.toFixed(1)}cm/年`, font:'bold 12px sans-serif',
+          fillColor:Cesium.Color.WHITE, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3, outlineColor:Cesium.Color.BLACK,
+          pixelOffset:new Cesium.Cartesian2(0,-10),
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,3.0e7) } }));
+    }
+  }
+  document.getElementById('cnt').textContent=PLATES.length;
+  document.getElementById('upd').textContent='プレート境界（橙線）＋運動ベクトル（青矢印＝進む向き / 数字＝年間の移動量）NNR-MORVEL56';
+}
+function setPlates(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on')); refreshPhotoButtons();
+  const btn=document.getElementById('bPlate'); if(btn)btn.classList.add('on');
+  setModeLbl('プレート'); clearStarlink(); setBasemap('dark'); // clearNewModes はここで走る
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
+  setErr('プレート境界を読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(150,10,2.2e7), duration:1.5 });
+  loadPlateBoundaries().then(()=>{ buildPlateVectors(); setErr(null); });
+}
+
+// ===== 海面水温（NASA GIBS / GHRSST MUR・海の暖流/寒流が色で見える）=====
+function sstDate(){ const d=new Date(Date.now()-3*24*3600e3); return d.toISOString().slice(0,10); } // 3日前(配信済み)
+function setSST(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on')); refreshPhotoButtons();
+  const btn=document.getElementById('bSST'); if(btn)btn.classList.add('on');
+  setModeLbl('海面水温'); clearStarlink(); setBasemap('dark'); // clearNewModes 実行
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
+  sstLayer=viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+    url:`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GHRSST_L4_MUR_Sea_Surface_Temperature/default/${sstDate()}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`,
+    maximumLevel:7, credit:'NASA EOSDIS GIBS / GHRSST MUR' }));
+  sstLayer.alpha=0.85;
+  document.getElementById('cnt').textContent='🌡';
+  document.getElementById('upd').textContent=`海面水温（${sstDate()}）赤=暖かい → 青=冷たい。黒潮などの暖流が見える・NASA GHRSST MUR`;
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,25,2.4e7), duration:1.5 });
+  setErr(null);
 }
 
 setLive();
