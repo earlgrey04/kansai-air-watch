@@ -59,7 +59,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v34-esri-default</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span> 機<br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v34-esri-default</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -72,9 +72,11 @@
   <button id="bVol" onclick="setVolcanoes()">🌋 火山</button>
   <button id="bPlate" onclick="setPlates()">🗺️ プレート</button>
   <button id="bSST" onclick="setSST()">🌡️ 水温</button>
+  <button id="bCable" onclick="setCables()">🔌 海底ケーブル</button>
   <button onclick="setSatellites()">🛰️ 衛星</button>
   <button id="bModis" onclick="setSatPhoto('modis')">📷 MODIS</button>
   <button id="bEsri" onclick="setSatPhoto('esri')">🌐 Esri</button>
+  <button id="bOcean" onclick="setSatPhoto('ocean')">🌊 海底地形</button>
   <button onclick="location.href='solar.html'">🪐 天体</button>
 </div>
 <div id="satbar">
@@ -96,7 +98,7 @@ const HDRS = { apikey: KEY, Authorization: "Bearer " + KEY };
 const MODEL_URL = "https://cesium.com/downloads/cesiumjs/releases/1.118/Apps/SampleData/models/CesiumAir/Cesium_Air.glb";
 const FT2M = 0.3048;
 const setErr = m => { const e=document.getElementById('err'); if(!m){e.style.display='none';return;} e.style.display='block'; e.textContent=m; };
-const setModeLbl = t => { document.getElementById('mode').textContent=t; };
+const setModeLbl = t => { document.getElementById('mode').textContent=t; const u=document.getElementById('cntUnit'); if(u)u.style.display=(t==='LIVE')?'':'none'; };
 window.onerror = (m,src,l,c,e)=>{ try{ setErr("JSエラー: "+m+" @"+l); }catch(_){} };
 
 Cesium.Ion.defaultAccessToken = "";
@@ -140,17 +142,16 @@ viewer.scene.globe.enableLighting = false;  // 太陽依存の陰影オフ（夜
 let weatherOn=false, curBasemap='light';
 let satPhoto='esri'; // 衛星写真ベースマップ既定=Esri高解像実写（null=地図 / 'modis'=日次真彩色）
 function refreshPhotoButtons(){ // モード切替でボタンonが消えるので実写ボタンの状態を再適用
-  const m=document.getElementById('bModis'), e=document.getElementById('bEsri');
+  const m=document.getElementById('bModis'), e=document.getElementById('bEsri'), o=document.getElementById('bOcean');
   if(m) m.classList.toggle('on', satPhoto==='modis');
   if(e) e.classList.toggle('on', satPhoto==='esri');
+  if(o) o.classList.toggle('on', satPhoto==='ocean');
 }
 function gibsDate(){ const d=new Date(Date.now()-24*3600e3); return d.toISOString().slice(0,10); } // 前日UTC（GIBS配信済み）
 // 実写ベースマップ: MODIS / Esri を個別トグル（もう一度押すと地図に戻る・相互排他）
 function setSatPhoto(kind){
   satPhoto = (satPhoto===kind) ? null : kind;
-  const m=document.getElementById('bModis'), e=document.getElementById('bEsri');
-  if(m) m.classList.toggle('on', satPhoto==='modis');
-  if(e) e.classList.toggle('on', satPhoto==='esri');
+  refreshPhotoButtons();
   setBasemap(curBasemap);
 }
 let wxLayers={}, wxFrames=[], wxIndex=0, wxTimer=null; // wxLayers: idx→ImageryLayer（生成後キャッシュ＝チカチカ防止）
@@ -239,6 +240,15 @@ function setBasemap(mode){
       url:"https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       maximumLevel:19, credit:"Esri, Maxar, Earthstar Geographics" }));
     viewer.scene.globe.baseColor = Cesium.Color.BLACK;
+  } else if(satPhoto==='ocean'){
+    // Esri World Ocean Base（海底地形＝水深陰影図）＋ Reference（海嶺・海溝などの地名）
+    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url:"https://services.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}",
+      maximumLevel:13, credit:"Esri, GEBCO, NOAA, National Geographic" }));
+    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url:"https://services.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}",
+      maximumLevel:13, credit:"Esri" }));
+    viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#0a2b45");
   } else {
     const url = mode==='dark'
       ? "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
@@ -251,12 +261,14 @@ function setBasemap(mode){
   if(lightningOn && mode!=='dark') loadLightning(); // 雷ナウキャストを上に復元
 }
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
-var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null;
+var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null;
 function clearNewModes(){
   if(plateBoundarySrc){ try{ viewer.dataSources.remove(plateBoundarySrc,true); }catch(_){} plateBoundarySrc=null; }
   if(plateVecEnts && plateVecEnts.length){ for(const e of plateVecEnts){ try{ viewer.entities.remove(e); }catch(_){} } }
   plateVecEnts=[];
   if(sstLayer){ try{ viewer.imageryLayers.remove(sstLayer); }catch(_){} sstLayer=null; }
+  if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
+  if(landingSrc){ try{ viewer.dataSources.remove(landingSrc,true); }catch(_){} landingSrc=null; }
 }
 // 雨雲アニメ ON/OFF。ON中はライブ機を止めて雨雲に集中、OFFでライブへ戻す
 async function toggleWeather(){
@@ -868,6 +880,49 @@ function setSST(){
   document.getElementById('upd').textContent=`海面水温（${sstDate()}）赤=暖かい → 青=冷たい。黒潮などの暖流が見える・NASA GHRSST MUR`;
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,25,2.4e7), duration:1.5 });
   setErr(null);
+}
+
+// ===== 海底ケーブル（TeleGeography・color=ケーブル別／陸揚局＝黄点）=====
+// データはCORS不可のためリポジトリ同梱（cables.json / cable-landings.json）＝同一オリジンで取得
+async function loadCables(){
+  try{
+    const src=await Cesium.GeoJsonDataSource.load('cables.json', { clampToGround:false });
+    for(const e of src.entities.values){ if(e.polyline){
+      let col='#7fd0ff';
+      try{ const c=e.properties&&e.properties.color&&e.properties.color.getValue(); if(c) col=c; }catch(_){}
+      e.polyline.width=1.6;
+      e.polyline.material=Cesium.Color.fromCssColorString(col).withAlpha(0.9);
+      e.polyline.arcType=Cesium.ArcType.GEODESIC;
+    } }
+    cableSrc=src; viewer.dataSources.add(src);
+    // 陸揚局（点・近距離のみ表示でクラッタ抑制）
+    const ls=await Cesium.GeoJsonDataSource.load('cable-landings.json', { clampToGround:false });
+    for(const e of ls.entities.values){
+      e.billboard=undefined; e.label=undefined;
+      if(e.position){ e.point=new Cesium.PointGraphics({ pixelSize:3,
+        color:Cesium.Color.fromCssColorString('#ffd34d'), outlineColor:Cesium.Color.BLACK, outlineWidth:0.5,
+        distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, 6.0e6) }); }
+    }
+    landingSrc=ls; viewer.dataSources.add(ls);
+    const nCables=new Set(src.entities.values.map(e=>e.name)).size;
+    document.getElementById('cnt').textContent=nCables+' 本';
+    document.getElementById('upd').textContent='世界の海底ケーブル（色＝ケーブル別）＋陸揚局（黄点・接近で表示）・出典: TeleGeography (submarinecablemap.com)';
+    setErr(null);
+  }catch(e){ setErr('海底ケーブルの取得失敗: '+(e&&e.message||e)); }
+}
+function setCables(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto='ocean'; refreshPhotoButtons();          // 既定で海底地形の上に表示
+  const btn=document.getElementById('bCable'); if(btn)btn.classList.add('on');
+  setModeLbl('海底ケーブル'); clearStarlink(); setBasemap('dark'); // ocean優先で海底ベースが出る／clearNewModesで前回分を掃除
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
+  setErr('海底ケーブルを読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,20,2.6e7), duration:1.5 });
+  loadCables();
 }
 
 setLive();
