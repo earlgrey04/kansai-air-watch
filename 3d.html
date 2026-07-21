@@ -241,10 +241,11 @@ function setBasemap(mode){
       maximumLevel:19, credit:"Esri, Maxar, Earthstar Geographics" }));
     viewer.scene.globe.baseColor = Cesium.Color.BLACK;
   } else if(satPhoto==='ocean'){
-    // Esri World Ocean Base（海底地形＝水深陰影図）＋ Reference（海嶺・海溝などの地名）
-    viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-      url:"https://services.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}",
-      maximumLevel:13, credit:"Esri, GEBCO, NOAA, National Geographic" }));
+    // GEBCO 水深図（鮮やかな深浅グラデーション）＋ Esri Ocean Reference（海溝・海盆などの地名）
+    viewer.imageryLayers.addImageryProvider(new Cesium.WebMapServiceImageryProvider({
+      url:"https://wms.gebco.net/mapserv?", layers:"GEBCO_LATEST",
+      parameters:{ version:"1.3.0", format:"image/png", transparent:false },
+      maximumLevel:7, credit:"GEBCO Compilation Group (GEBCO 2024 Grid)" }));
     viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
       url:"https://services.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}",
       maximumLevel:13, credit:"Esri" }));
