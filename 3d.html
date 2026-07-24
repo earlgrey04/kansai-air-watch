@@ -965,29 +965,41 @@ function windAt(lon,lat){
   const bl=M=>M[i0][j0]*(1-di)*(1-dj)+M[i0][j0+1]*(1-di)*dj+M[i0+1][j0]*di*(1-dj)+M[i0+1][j0+1]*di*dj;
   return {u:bl(g.U), v:bl(g.V), sp:bl(g.SP)};
 }
-function windColor(sp,alpha){ // 淡青(遅)→シアン→白(速・ジェット核)
+const _wc=new Cesium.Color();
+function windColor(sp,alpha){ // 淡青(遅)→シアン→白(速・ジェット核) ※スクラッチ再利用（GC削減）
   const t=Math.max(0,Math.min(1,sp/70));
-  return new Cesium.Color(0.45+0.55*t, 0.75+0.25*t, 1.0, alpha);
+  _wc.red=0.45+0.55*t; _wc.green=0.75+0.25*t; _wc.blue=1.0; _wc.alpha=alpha; return _wc;
 }
 function startWind(){
-  const g=windGrid, N=4000, MAXAGE=100, K=0.007, ALT=10360; // K=風速→度/フレーム、ALT=250hPa高度(m)
+  const g=windGrid, N=2200, TRAIL=8, MAXAGE=110, K=0.0065, ALT=10360; // TRAIL=尾の長さ、K=風速→度/フレーム
   const loW=g.gLon[0], hiW=g.gLon[g.nLon-1], loA=g.gLat[0], hiA=g.gLat[g.nLat-1];
   windPrim=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
-  const P=[], scratch=new Cesium.Cartesian3();
-  const spawn=p=>{ p.lon=loW+Math.random()*(hiW-loW); p.lat=loA+Math.random()*(hiA-loA); p.age=Math.random()*MAXAGE|0; };
-  for(let k=0;k<N;k++){ const pt=windPrim.add({position:Cesium.Cartesian3.fromDegrees(0,0,ALT),pixelSize:2,color:Cesium.Color.TRANSPARENT}); const p={pt,lon:0,lat:0,age:0}; spawn(p); P.push(p); }
+  const P=[], scratch=new Cesium.Cartesian3(), talpha=[];
+  for(let k=0;k<TRAIL;k++) talpha.push(Math.pow(1-k/TRAIL,1.3)); // 頭=1→尾=薄 の減衰
+  const spawn=p=>{ p.lon=loW+Math.random()*(hiW-loW); p.lat=loA+Math.random()*(hiA-loA); p.age=Math.random()*MAXAGE|0;
+    for(let k=0;k<TRAIL;k++){ p.hist[k][0]=p.lon; p.hist[k][1]=p.lat; } };
+  for(let n=0;n<N;n++){
+    const p={pts:[],hist:[],lon:0,lat:0,age:0};
+    for(let k=0;k<TRAIL;k++){ p.hist.push([0,0]); p.pts.push(windPrim.add({position:Cesium.Cartesian3.fromDegrees(0,0,ALT),pixelSize:2,color:Cesium.Color.TRANSPARENT})); }
+    spawn(p); P.push(p);
+  }
   windParticles=P;
   const ticker=()=>{
     if(!windPrim) return;
     for(const p of P){
       const w=windAt(p.lon,p.lat);
-      if(!w || w.sp<1.5 || p.age>MAXAGE){ spawn(p); p.pt.color=Cesium.Color.TRANSPARENT; continue; }
+      if(!w || w.sp<1.5 || p.age>MAXAGE){ spawn(p); for(const pt of p.pts) pt.color=Cesium.Color.TRANSPARENT; continue; }
       const cs=Math.cos(p.lat*Math.PI/180)||0.3;
       p.lon += (w.u*K)/cs; p.lat += w.v*K; p.age++;
-      const fade=Math.min(1, Math.min(p.age, MAXAGE-p.age)/10);
-      const a=fade*(0.30+0.70*Math.min(1,w.sp/45));
-      Cesium.Cartesian3.fromDegrees(p.lon,p.lat,ALT,undefined,scratch);
-      p.pt.position=scratch; p.pt.color=windColor(w.sp,a); p.pt.pixelSize=1.4+2.6*Math.min(1,w.sp/60);
+      for(let k=TRAIL-1;k>0;k--){ p.hist[k][0]=p.hist[k-1][0]; p.hist[k][1]=p.hist[k-1][1]; } // 尾を1つずらす
+      p.hist[0][0]=p.lon; p.hist[0][1]=p.lat;                                                   // 頭＝最新位置
+      const fade=Math.min(1, Math.min(p.age, MAXAGE-p.age)/12), spd=w.sp, base=0.30+0.70*Math.min(1,spd/45);
+      for(let k=0;k<TRAIL;k++){
+        Cesium.Cartesian3.fromDegrees(p.hist[k][0],p.hist[k][1],ALT,undefined,scratch);
+        const pt=p.pts[k]; pt.position=scratch;
+        pt.color=windColor(spd, fade*base*talpha[k]);
+        pt.pixelSize=(1.2+2.4*Math.min(1,spd/60))*(1-0.55*k/TRAIL);
+      }
     }
   };
   windTickRemove=viewer.clock.onTick.addEventListener(ticker);
@@ -996,9 +1008,9 @@ function setWind(){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
-  satPhoto=null; refreshPhotoButtons();                 // 暗い地図で風を目立たせる
+  satPhoto='esri'; refreshPhotoButtons();               // Esri実写の上に風を重ねる
   const btn=document.getElementById('bWind'); if(btn)btn.classList.add('on');
-  setModeLbl('上空の風'); clearStarlink(); setBasemap('dark'); // clearNewModes で前回分を掃除
+  setModeLbl('上空の風'); clearStarlink(); setBasemap('dark'); // esri優先で実写ベース／clearNewModes で前回分を掃除
   viewer.clock.shouldAnimate=false;
   viewer.entities.removeAll(); plateVecEnts=[];
   const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
