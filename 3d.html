@@ -73,6 +73,7 @@
   <button id="bPlate" onclick="setPlates()">🗺️ プレート</button>
   <button id="bSST" onclick="setSST()">🌡️ 水温</button>
   <button id="bCable" onclick="setCables()">🔌 海底ケーブル</button>
+  <button id="bWind" onclick="setWind()">🌬️ 上空の風</button>
   <button onclick="setSatellites()">🛰️ 衛星</button>
   <button id="bModis" onclick="setSatPhoto('modis')">📷 MODIS</button>
   <button id="bEsri" onclick="setSatPhoto('esri')">🌐 Esri</button>
@@ -263,6 +264,7 @@ function setBasemap(mode){
 }
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null;
+var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null;
 function clearNewModes(){
   if(plateBoundarySrc){ try{ viewer.dataSources.remove(plateBoundarySrc,true); }catch(_){} plateBoundarySrc=null; }
   if(plateVecEnts && plateVecEnts.length){ for(const e of plateVecEnts){ try{ viewer.entities.remove(e); }catch(_){} } }
@@ -270,6 +272,9 @@ function clearNewModes(){
   if(sstLayer){ try{ viewer.imageryLayers.remove(sstLayer); }catch(_){} sstLayer=null; }
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
   if(landingSrc){ try{ viewer.dataSources.remove(landingSrc,true); }catch(_){} landingSrc=null; }
+  if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
+  if(windPrim){ try{ viewer.scene.primitives.remove(windPrim); }catch(_){} windPrim=null; }
+  windParticles=null; windGrid=null;
 }
 // 雨雲アニメ ON/OFF。ON中はライブ機を止めて雨雲に集中、OFFでライブへ戻す
 async function toggleWeather(){
@@ -924,6 +929,87 @@ function setCables(){
   setErr('海底ケーブルを読み込み中…');
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,20,2.6e7), duration:1.5 });
   loadCables();
+}
+
+// ===== 上空の風（ジェット気流）: Open-Meteo GFS 250hPa を粒子アニメで可視化 =====
+// データはCORS *（ブラウザ直取得）。緯度・経度をペアで並べてグリッドを一括取得。
+async function loadWindGrid(){
+  const lat0=10,lat1=70,lon0=105,lon1=180,step=5;
+  const gLat=[],gLon=[];
+  for(let la=lat0; la<=lat1; la+=step) gLat.push(la);
+  for(let lo=lon0; lo<=lon1; lo+=step) gLon.push(lo);
+  const lats=[],lons=[];
+  for(const la of gLat) for(const lo of gLon){ lats.push(la); lons.push(lo); }
+  const url=`https://api.open-meteo.com/v1/gfs?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
+    +`&hourly=wind_speed_250hPa,wind_direction_250hPa&wind_speed_unit=ms&forecast_days=1&timeformat=unixtime`;
+  const res=await (await fetch(url)).json();
+  const arr=Array.isArray(res)?res:[res];
+  const nLat=gLat.length, nLon=gLon.length, now=Date.now()/1000;
+  const U=[],V=[],SP=[];
+  for(let i=0;i<nLat;i++){ U.push(new Array(nLon)); V.push(new Array(nLon)); SP.push(new Array(nLon)); }
+  for(let k=0;k<arr.length && k<nLat*nLon;k++){
+    const h=arr[k].hourly; let ti=0;
+    for(let t=0;t<h.time.length;t++){ if(h.time[t]<=now) ti=t; }
+    const spd=h.wind_speed_250hPa[ti]||0, dir=h.wind_direction_250hPa[ti]||0, rad=dir*Math.PI/180;
+    const i=Math.floor(k/nLon), j=k%nLon;
+    U[i][j]=-spd*Math.sin(rad); V[i][j]=-spd*Math.cos(rad); SP[i][j]=spd; // 気象風向→u(東),v(北) m/s
+  }
+  windGrid={lat0,lon0,step,nLat,nLon,U,V,SP,gLat,gLon};
+}
+function windAt(lon,lat){
+  const g=windGrid; if(!g) return null;
+  if(lat<g.gLat[0]||lat>g.gLat[g.nLat-1]||lon<g.gLon[0]||lon>g.gLon[g.nLon-1]) return null;
+  const fi=(lat-g.lat0)/g.step, fj=(lon-g.lon0)/g.step;
+  let i0=Math.max(0,Math.min(g.nLat-2,Math.floor(fi))), j0=Math.max(0,Math.min(g.nLon-2,Math.floor(fj)));
+  const di=fi-i0, dj=fj-j0;
+  const bl=M=>M[i0][j0]*(1-di)*(1-dj)+M[i0][j0+1]*(1-di)*dj+M[i0+1][j0]*di*(1-dj)+M[i0+1][j0+1]*di*dj;
+  return {u:bl(g.U), v:bl(g.V), sp:bl(g.SP)};
+}
+function windColor(sp,alpha){ // 淡青(遅)→シアン→白(速・ジェット核)
+  const t=Math.max(0,Math.min(1,sp/70));
+  return new Cesium.Color(0.45+0.55*t, 0.75+0.25*t, 1.0, alpha);
+}
+function startWind(){
+  const g=windGrid, N=4000, MAXAGE=100, K=0.007, ALT=10360; // K=風速→度/フレーム、ALT=250hPa高度(m)
+  const loW=g.gLon[0], hiW=g.gLon[g.nLon-1], loA=g.gLat[0], hiA=g.gLat[g.nLat-1];
+  windPrim=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+  const P=[], scratch=new Cesium.Cartesian3();
+  const spawn=p=>{ p.lon=loW+Math.random()*(hiW-loW); p.lat=loA+Math.random()*(hiA-loA); p.age=Math.random()*MAXAGE|0; };
+  for(let k=0;k<N;k++){ const pt=windPrim.add({position:Cesium.Cartesian3.fromDegrees(0,0,ALT),pixelSize:2,color:Cesium.Color.TRANSPARENT}); const p={pt,lon:0,lat:0,age:0}; spawn(p); P.push(p); }
+  windParticles=P;
+  const ticker=()=>{
+    if(!windPrim) return;
+    for(const p of P){
+      const w=windAt(p.lon,p.lat);
+      if(!w || w.sp<1.5 || p.age>MAXAGE){ spawn(p); p.pt.color=Cesium.Color.TRANSPARENT; continue; }
+      const cs=Math.cos(p.lat*Math.PI/180)||0.3;
+      p.lon += (w.u*K)/cs; p.lat += w.v*K; p.age++;
+      const fade=Math.min(1, Math.min(p.age, MAXAGE-p.age)/10);
+      const a=fade*(0.30+0.70*Math.min(1,w.sp/45));
+      Cesium.Cartesian3.fromDegrees(p.lon,p.lat,ALT,undefined,scratch);
+      p.pt.position=scratch; p.pt.color=windColor(w.sp,a); p.pt.pixelSize=1.4+2.6*Math.min(1,w.sp/60);
+    }
+  };
+  windTickRemove=viewer.clock.onTick.addEventListener(ticker);
+}
+function setWind(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto=null; refreshPhotoButtons();                 // 暗い地図で風を目立たせる
+  const btn=document.getElementById('bWind'); if(btn)btn.classList.add('on');
+  setModeLbl('上空の風'); clearStarlink(); setBasemap('dark'); // clearNewModes で前回分を掃除
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
+  setErr('上空の風（ジェット気流）を取得中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,32,1.7e7), duration:1.5 });
+  loadWindGrid().then(()=>{
+    startWind();
+    document.getElementById('cnt').textContent='🌬';
+    document.getElementById('upd').textContent='上空の風（約34,000ft／250hPa＝巡航高度）粒子＝気流の流れ・色/太さ＝風速。東行き便が速いのはこの風・出典 Open-Meteo GFS';
+    setErr(null);
+  }).catch(e=>setErr('風データの取得失敗: '+(e&&e.message||e)));
 }
 
 setLive();
