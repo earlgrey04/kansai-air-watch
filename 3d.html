@@ -264,7 +264,14 @@ function setBasemap(mode){
 }
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null;
-var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null;
+var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
+var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
+const WLV={ // 高度別: 表示名・高度表記・粒子の浮遊高度(m)・風速スケール(m/s)
+  '250hPa':{lbl:'巡航',ft:'約34,000ft',alt:10360,vmax:70},
+  '500hPa':{lbl:'中層',ft:'約18,000ft',alt:5570, vmax:45},
+  '850hPa':{lbl:'下層',ft:'約5,000ft', alt:1460, vmax:25},
+  '10m':   {lbl:'地上',ft:'地表10m',   alt:10,   vmax:15},
+};
 function clearNewModes(){
   if(plateBoundarySrc){ try{ viewer.dataSources.remove(plateBoundarySrc,true); }catch(_){} plateBoundarySrc=null; }
   if(plateVecEnts && plateVecEnts.length){ for(const e of plateVecEnts){ try{ viewer.entities.remove(e); }catch(_){} } }
@@ -274,7 +281,7 @@ function clearNewModes(){
   if(landingSrc){ try{ viewer.dataSources.remove(landingSrc,true); }catch(_){} landingSrc=null; }
   if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
   if(windPrim){ try{ viewer.scene.primitives.remove(windPrim); }catch(_){} windPrim=null; }
-  windParticles=null; windGrid=null;
+  windParticles=null; windGrid=null; windGridAll=null;
 }
 // 雨雲アニメ ON/OFF。ON中はライブ機を止めて雨雲に集中、OFFでライブへ戻す
 async function toggleWeather(){
@@ -933,30 +940,36 @@ function setCables(){
 
 // ===== 上空の風（ジェット気流）: Open-Meteo GFS 250hPa を粒子アニメで可視化 =====
 // データはCORS *（ブラウザ直取得）。緯度・経度をペアで並べてグリッドを一括取得。
-async function loadWindGrid(){
-  const lat0=-80,lat1=80,lon0=-180,lon1=170,step=10; // 全球10°グリッド（612点＝1リクエストで取得可）
+// 全高度(4レベル)を1リクエストでまとめて取得しキャッシュ → 高度切替は再fetchなし＝レート制限(429)回避
+async function loadWindGrids(){
+  const lat0=-80,lat1=80,lon0=-180,lon1=170,step=10; // 全球10°グリッド（612点）
   const gLat=[],gLon=[];
   for(let la=lat0; la<=lat1; la+=step) gLat.push(la);
   for(let lo=lon0; lo<=lon1; lo+=step) gLon.push(lo);
   const lats=[],lons=[];
   for(const la of gLat) for(const lo of gLon){ lats.push(la); lons.push(lo); }
+  const levels=Object.keys(WLV);
+  const vars=levels.map(l=>`wind_speed_${l},wind_direction_${l}`).join(',');
   const url=`https://api.open-meteo.com/v1/gfs?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
-    +`&hourly=wind_speed_250hPa,wind_direction_250hPa&wind_speed_unit=ms&forecast_days=1&timeformat=unixtime`;
+    +`&hourly=${vars}&wind_speed_unit=ms&forecast_days=1&timeformat=unixtime`;
   const res=await (await fetch(url)).json();
   const arr=Array.isArray(res)?res:[res];
   const nLat=gLat.length, nLon=gLon.length, now=Date.now()/1000;
-  const U=[],V=[],SP=[];
-  for(let i=0;i<nLat;i++){ U.push(new Array(nLon+1)); V.push(new Array(nLon+1)); SP.push(new Array(nLon+1)); }
-  for(let k=0;k<arr.length && k<nLat*nLon;k++){
-    const h=arr[k].hourly; let ti=0;
-    for(let t=0;t<h.time.length;t++){ if(h.time[t]<=now) ti=t; }
-    const spd=h.wind_speed_250hPa[ti]||0, dir=h.wind_direction_250hPa[ti]||0, rad=dir*Math.PI/180;
-    const i=Math.floor(k/nLon), j=k%nLon;
-    U[i][j]=-spd*Math.sin(rad); V[i][j]=-spd*Math.cos(rad); SP[i][j]=spd; // 気象風向→u(東),v(北) m/s
+  const out={};
+  for(const lv of levels){
+    const U=[],V=[],SP=[];
+    for(let i=0;i<nLat;i++){ U.push(new Array(nLon+1)); V.push(new Array(nLon+1)); SP.push(new Array(nLon+1)); }
+    for(let k=0;k<arr.length && k<nLat*nLon;k++){
+      const h=arr[k].hourly; let ti=0;
+      for(let t=0;t<h.time.length;t++){ if(h.time[t]<=now) ti=t; }
+      const spd=h[`wind_speed_${lv}`][ti]||0, dir=h[`wind_direction_${lv}`][ti]||0, rad=dir*Math.PI/180;
+      const i=Math.floor(k/nLon), j=k%nLon;
+      U[i][j]=-spd*Math.sin(rad); V[i][j]=-spd*Math.cos(rad); SP[i][j]=spd; // 気象風向→u(東),v(北) m/s
+    }
+    for(let i=0;i<nLat;i++){ U[i][nLon]=U[i][0]; V[i][nLon]=V[i][0]; SP[i][nLon]=SP[i][0]; } // 経度ラップ列
+    out[lv]={lat0,lon0,step,nLat,nLon:nLon+1,U,V,SP,gLat,gLon:gLon.concat(180)};
   }
-  for(let i=0;i<nLat;i++){ U[i][nLon]=U[i][0]; V[i][nLon]=V[i][0]; SP[i][nLon]=SP[i][0]; } // 経度ラップ列(180°=-180°)
-  gLon.push(180);
-  windGrid={lat0,lon0,step,nLat,nLon:nLon+1,U,V,SP,gLat,gLon};
+  windGridAll=out;
 }
 function windAt(lon,lat){
   const g=windGrid; if(!g) return null;
@@ -968,12 +981,14 @@ function windAt(lon,lat){
   return {u:bl(g.U), v:bl(g.V), sp:bl(g.SP)};
 }
 const _wc=new Cesium.Color();
-function windColor(sp,alpha){ // アンバー(遅)→黄→白(速・ジェット核)。青い海/実写と明確に区別 ※スクラッチ再利用
-  const t=Math.max(0,Math.min(1,sp/70));
+function windColor(sp,alpha){ // アンバー(遅)→黄→白(速)。各高度の風速スケール(windVmax)で正規化 ※スクラッチ再利用
+  const t=Math.max(0,Math.min(1,sp/windVmax));
   _wc.red=1.0; _wc.green=0.72+0.28*t; _wc.blue=0.28+0.67*t; _wc.alpha=alpha; return _wc;
 }
 function startWind(){
-  const g=windGrid, N=6500, TRAIL=5, MAXAGE=110, K=0.0065, ALT=10360; // 高密度の細かいドット（頭多め・尾短め）
+  const cfg=WLV[windLevel]||WLV['250hPa']; windVmax=cfg.vmax;
+  const g=windGrid, N=6500, TRAIL=5, MAXAGE=110, ALT=cfg.alt; // 高密度の細かいドット（頭多め・尾短め）
+  const K=Math.min(0.03, 0.0065*70/cfg.vmax); // 低層ほど風が弱いので流速を補正（見た目の流れを一定に）
   const loW=g.gLon[0], hiW=g.gLon[g.nLon-1], loA=g.gLat[0], hiA=g.gLat[g.nLat-1];
   windPrim=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
   const P=[], scratch=new Cesium.Cartesian3(), talpha=[];
@@ -998,12 +1013,12 @@ function startWind(){
       if(wrapped){ for(let k=0;k<TRAIL;k++){ p.hist[k][0]=p.lon; p.hist[k][1]=p.lat; } }           // 尾が地球を横断しないよう畳む
       else { for(let k=TRAIL-1;k>0;k--){ p.hist[k][0]=p.hist[k-1][0]; p.hist[k][1]=p.hist[k-1][1]; } // 尾を1つずらす
         p.hist[0][0]=p.lon; p.hist[0][1]=p.lat; }                                                   // 頭＝最新位置
-      const fade=Math.min(1, Math.min(p.age, MAXAGE-p.age)/12), spd=w.sp, base=0.55+0.45*Math.min(1,spd/45);
+      const fade=Math.min(1, Math.min(p.age, MAXAGE-p.age)/12), spd=w.sp, base=0.55+0.45*Math.min(1,spd/(windVmax*0.62));
       for(let k=0;k<TRAIL;k++){
         Cesium.Cartesian3.fromDegrees(p.hist[k][0],p.hist[k][1],ALT,undefined,scratch);
         const pt=p.pts[k]; pt.position=scratch;
         pt.color=windColor(spd, fade*base*talpha[k]);
-        pt.pixelSize=(1.5+2.1*Math.min(1,spd/60))*(1-0.4*k/TRAIL);
+        pt.pixelSize=(1.5+2.1*Math.min(1,spd/(windVmax*0.85)))*(1-0.4*k/TRAIL);
       }
     }
   };
@@ -1018,15 +1033,35 @@ function setWind(){
   setModeLbl('上空の風'); clearStarlink(); setBasemap('dark'); // esri優先で実写ベース／clearNewModes で前回分を掃除
   viewer.clock.shouldAnimate=false;
   viewer.entities.removeAll(); plateVecEnts=[];
-  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
-  setErr('上空の風（ジェット気流）を取得中…');
+  windLevel='250hPa';                                    // 入場時は巡航高度（ジェット気流）から
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,25,2.7e7), duration:1.5 });
-  loadWindGrid().then(()=>{
-    startWind();
-    document.getElementById('cnt').textContent='🌬';
-    document.getElementById('upd').textContent='上空の風（全球・約34,000ft／250hPa＝巡航高度）粒子＝気流の流れ・色/太さ＝風速。地球を回すと各地のジェット気流が見える・出典 Open-Meteo GFS';
-    setErr(null);
-  }).catch(e=>setErr('風データの取得失敗: '+(e&&e.message||e)));
+  windLevelBar();
+  loadAndStartWind();
+}
+function windLabel(){
+  const cfg=WLV[windLevel];
+  document.getElementById('cnt').textContent='🌬';
+  document.getElementById('upd').textContent=`上空の風（全球・${cfg.ft}／${windLevel}＝${cfg.lbl}）粒子＝気流の流れ・色/太さ＝風速。下の高度ボタンで切替・出典 Open-Meteo GFS`;
+}
+function windLevelBar(){
+  const mb=document.getElementById('modebar'); if(!mb)return; mb.style.display='flex';
+  mb.innerHTML=Object.keys(WLV).map(v=>`<button class="${windLevel===v?'on':''}" onclick="setWindLevel('${v}')">${WLV[v].lbl}<span style="opacity:.55;font-size:9px"> ${WLV[v].ft}</span></button>`).join('');
+}
+function loadAndStartWind(){
+  setErr('上空の風（全高度）を取得中…');
+  return loadWindGrids().then(()=>{ windGrid=windGridAll[windLevel]; startWind(); windLabel(); windLevelBar(); setErr(null); })
+    .catch(e=>setErr('風データの取得失敗: '+(e&&e.message||e)));
+}
+function stopWindParticles(){
+  if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
+  if(windPrim){ try{ viewer.scene.primitives.remove(windPrim); }catch(_){} windPrim=null; }
+  windParticles=null;
+}
+function setWindLevel(v){
+  if(!WLV[v] || (v===windLevel && windPrim)) return;     // 同じ高度なら何もしない
+  windLevel=v; stopWindParticles(); windLevelBar();      // ボタンのon状態を即反映（カメラは動かさない）
+  if(windGridAll && windGridAll[v]){ windGrid=windGridAll[v]; startWind(); windLabel(); } // キャッシュから即時（再fetchなし）
+  else loadAndStartWind();
 }
 
 setLive();
