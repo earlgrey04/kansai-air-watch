@@ -934,7 +934,7 @@ function setCables(){
 // ===== 上空の風（ジェット気流）: Open-Meteo GFS 250hPa を粒子アニメで可視化 =====
 // データはCORS *（ブラウザ直取得）。緯度・経度をペアで並べてグリッドを一括取得。
 async function loadWindGrid(){
-  const lat0=10,lat1=70,lon0=105,lon1=180,step=5;
+  const lat0=-80,lat1=80,lon0=-180,lon1=170,step=10; // 全球10°グリッド（612点＝1リクエストで取得可）
   const gLat=[],gLon=[];
   for(let la=lat0; la<=lat1; la+=step) gLat.push(la);
   for(let lo=lon0; lo<=lon1; lo+=step) gLon.push(lo);
@@ -946,7 +946,7 @@ async function loadWindGrid(){
   const arr=Array.isArray(res)?res:[res];
   const nLat=gLat.length, nLon=gLon.length, now=Date.now()/1000;
   const U=[],V=[],SP=[];
-  for(let i=0;i<nLat;i++){ U.push(new Array(nLon)); V.push(new Array(nLon)); SP.push(new Array(nLon)); }
+  for(let i=0;i<nLat;i++){ U.push(new Array(nLon+1)); V.push(new Array(nLon+1)); SP.push(new Array(nLon+1)); }
   for(let k=0;k<arr.length && k<nLat*nLon;k++){
     const h=arr[k].hourly; let ti=0;
     for(let t=0;t<h.time.length;t++){ if(h.time[t]<=now) ti=t; }
@@ -954,7 +954,9 @@ async function loadWindGrid(){
     const i=Math.floor(k/nLon), j=k%nLon;
     U[i][j]=-spd*Math.sin(rad); V[i][j]=-spd*Math.cos(rad); SP[i][j]=spd; // 気象風向→u(東),v(北) m/s
   }
-  windGrid={lat0,lon0,step,nLat,nLon,U,V,SP,gLat,gLon};
+  for(let i=0;i<nLat;i++){ U[i][nLon]=U[i][0]; V[i][nLon]=V[i][0]; SP[i][nLon]=SP[i][0]; } // 経度ラップ列(180°=-180°)
+  gLon.push(180);
+  windGrid={lat0,lon0,step,nLat,nLon:nLon+1,U,V,SP,gLat,gLon};
 }
 function windAt(lon,lat){
   const g=windGrid; if(!g) return null;
@@ -966,12 +968,12 @@ function windAt(lon,lat){
   return {u:bl(g.U), v:bl(g.V), sp:bl(g.SP)};
 }
 const _wc=new Cesium.Color();
-function windColor(sp,alpha){ // 淡青(遅)→シアン→白(速・ジェット核) ※スクラッチ再利用（GC削減）
+function windColor(sp,alpha){ // アンバー(遅)→黄→白(速・ジェット核)。青い海/実写と明確に区別 ※スクラッチ再利用
   const t=Math.max(0,Math.min(1,sp/70));
-  _wc.red=0.45+0.55*t; _wc.green=0.75+0.25*t; _wc.blue=1.0; _wc.alpha=alpha; return _wc;
+  _wc.red=1.0; _wc.green=0.72+0.28*t; _wc.blue=0.28+0.67*t; _wc.alpha=alpha; return _wc;
 }
 function startWind(){
-  const g=windGrid, N=2200, TRAIL=8, MAXAGE=110, K=0.0065, ALT=10360; // TRAIL=尾の長さ、K=風速→度/フレーム
+  const g=windGrid, N=2800, TRAIL=7, MAXAGE=110, K=0.0065, ALT=10360; // TRAIL=尾の長さ、K=風速→度/フレーム
   const loW=g.gLon[0], hiW=g.gLon[g.nLon-1], loA=g.gLat[0], hiA=g.gLat[g.nLat-1];
   windPrim=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
   const P=[], scratch=new Cesium.Cartesian3(), talpha=[];
@@ -989,16 +991,19 @@ function startWind(){
     for(const p of P){
       const w=windAt(p.lon,p.lat);
       if(!w || w.sp<1.5 || p.age>MAXAGE){ spawn(p); for(const pt of p.pts) pt.color=Cesium.Color.TRANSPARENT; continue; }
-      const cs=Math.cos(p.lat*Math.PI/180)||0.3;
+      const cs=Math.max(0.25, Math.cos(p.lat*Math.PI/180)); // 極付近の経度暴走を抑制
       p.lon += (w.u*K)/cs; p.lat += w.v*K; p.age++;
-      for(let k=TRAIL-1;k>0;k--){ p.hist[k][0]=p.hist[k-1][0]; p.hist[k][1]=p.hist[k-1][1]; } // 尾を1つずらす
-      p.hist[0][0]=p.lon; p.hist[0][1]=p.lat;                                                   // 頭＝最新位置
-      const fade=Math.min(1, Math.min(p.age, MAXAGE-p.age)/12), spd=w.sp, base=0.30+0.70*Math.min(1,spd/45);
+      let wrapped=false;
+      if(p.lon>180){ p.lon-=360; wrapped=true; } else if(p.lon<-180){ p.lon+=360; wrapped=true; } // 日付変更線ラップ
+      if(wrapped){ for(let k=0;k<TRAIL;k++){ p.hist[k][0]=p.lon; p.hist[k][1]=p.lat; } }           // 尾が地球を横断しないよう畳む
+      else { for(let k=TRAIL-1;k>0;k--){ p.hist[k][0]=p.hist[k-1][0]; p.hist[k][1]=p.hist[k-1][1]; } // 尾を1つずらす
+        p.hist[0][0]=p.lon; p.hist[0][1]=p.lat; }                                                   // 頭＝最新位置
+      const fade=Math.min(1, Math.min(p.age, MAXAGE-p.age)/12), spd=w.sp, base=0.55+0.45*Math.min(1,spd/45);
       for(let k=0;k<TRAIL;k++){
         Cesium.Cartesian3.fromDegrees(p.hist[k][0],p.hist[k][1],ALT,undefined,scratch);
         const pt=p.pts[k]; pt.position=scratch;
         pt.color=windColor(spd, fade*base*talpha[k]);
-        pt.pixelSize=(1.2+2.4*Math.min(1,spd/60))*(1-0.55*k/TRAIL);
+        pt.pixelSize=(2.4+3.4*Math.min(1,spd/60))*(1-0.5*k/TRAIL);
       }
     }
   };
@@ -1015,11 +1020,11 @@ function setWind(){
   viewer.entities.removeAll(); plateVecEnts=[];
   const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
   setErr('上空の風（ジェット気流）を取得中…');
-  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,32,1.7e7), duration:1.5 });
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,25,2.7e7), duration:1.5 });
   loadWindGrid().then(()=>{
     startWind();
     document.getElementById('cnt').textContent='🌬';
-    document.getElementById('upd').textContent='上空の風（約34,000ft／250hPa＝巡航高度）粒子＝気流の流れ・色/太さ＝風速。東行き便が速いのはこの風・出典 Open-Meteo GFS';
+    document.getElementById('upd').textContent='上空の風（全球・約34,000ft／250hPa＝巡航高度）粒子＝気流の流れ・色/太さ＝風速。地球を回すと各地のジェット気流が見える・出典 Open-Meteo GFS';
     setErr(null);
   }).catch(e=>setErr('風データの取得失敗: '+(e&&e.message||e)));
 }
