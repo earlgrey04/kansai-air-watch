@@ -1105,17 +1105,15 @@ function histEqDecayFlash(now){ // 出現直後の点を白→深さ色へフェ
   if(!histEqFlash.length) return;
   const keep=[];
   for(const fl of histEqFlash){
-    const f=(now-fl.born)/EQ_FLASH_MS, i=fl.i;
-    if(f>=1){ histEqPts[i].color=histEqColors[i]; histEqPts[i].pixelSize=histEqSizes[i]; }
-    else{ Cesium.Color.lerp(Cesium.Color.WHITE, histEqColors[i], f, _wl);
-      histEqPts[i].color=Cesium.Color.clone(_wl); histEqPts[i].pixelSize=Math.max(3.5, histEqSizes[i]*(4.0-2.4*f)); keep.push(fl); }
+    if(now-fl.born >= EQ_FLASH_MS){ histEqPts[fl.i].color=histEqColors[fl.i]; } // 期限切れのみ最終色へ（1回だけ書き込む）
+    else keep.push(fl); // 点灯中(白)は毎フレーム触らない＝点群バッファの再構築を最小化
   }
   histEqFlash=keep;
 }
 function histEqRender(flash){ // curT(=histEqT) 以下を可視化（累積・消えない）
   const now=histEqNow();
   while(histEqIdx<histEqData.length && histEqData[histEqIdx][0]<=histEqT){
-    if(flash){ histEqPts[histEqIdx].color=Cesium.Color.WHITE; histEqPts[histEqIdx].pixelSize=Math.max(3.5,histEqSizes[histEqIdx]*4.0); histEqFlash.push({i:histEqIdx,born:now}); }
+    if(flash){ histEqPts[histEqIdx].color=Cesium.Color.WHITE; histEqFlash.push({i:histEqIdx,born:now}); } // 出現スパークは色のみ（サイズ変更なし）
     else{ histEqPts[histEqIdx].color=histEqColors[histEqIdx]; }
     histEqIdx++;
   }
@@ -1210,13 +1208,13 @@ async function tkLoad(){
   }
   tkT0=tkTimes[0]; tkT1=tkTimes[n-1];
 }
-function tkDecay(){ if(!tkFlash.length) return; const keep=[]; for(const fl of tkFlash){ fl.age++; const f=fl.age/TK_FLASHN,i=fl.i;
-  if(f>=1){ tkPts[i].color=tkColOf(i); tkPts[i].pixelSize=tkSizes[i]; }
-  else{ Cesium.Color.lerp(Cesium.Color.WHITE,tkColOf(i),f,_tkl); tkPts[i].color=Cesium.Color.clone(_tkl); tkPts[i].pixelSize=Math.max(3.5,tkSizes[i]*(4.0-2.4*f)); keep.push(fl); } } tkFlash=keep; }
+function tkDecay(){ if(!tkFlash.length) return; const keep=[]; for(const fl of tkFlash){ fl.age++;
+  if(fl.age>=TK_FLASHN){ tkPts[fl.i].color=tkColOf(fl.i); } // 期限切れのみ最終色へ（1回だけ）
+  else keep.push(fl); } tkFlash=keep; } // 点灯中は毎フレーム触らない
 function tkSettle(){ for(const fl of tkFlash){ tkPts[fl.i].color=tkColOf(fl.i); tkPts[fl.i].pixelSize=tkSizes[fl.i]; } tkFlash=[]; }
 function tkRender(flash){
   while(tkIdx<tkN && tkTimes[tkIdx]<=tkT){
-    if(tkMag[tkIdx]>=tkMagMin){ if(flash){ tkPts[tkIdx].color=Cesium.Color.WHITE; tkPts[tkIdx].pixelSize=Math.max(3.5,tkSizes[tkIdx]*4.0); tkFlash.push({i:tkIdx,age:0}); } else tkPts[tkIdx].color=tkColOf(tkIdx); tkShown++; }
+    if(tkMag[tkIdx]>=tkMagMin){ if(flash){ tkPts[tkIdx].color=Cesium.Color.WHITE; tkFlash.push({i:tkIdx,age:0}); } else tkPts[tkIdx].color=tkColOf(tkIdx); tkShown++; }
     tkIdx++;
   }
   if(flash) tkDecay();
