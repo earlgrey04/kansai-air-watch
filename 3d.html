@@ -70,6 +70,7 @@
   <button id="bLtn" onclick="toggleLightning()">⚡ 雷</button>
   <button id="bEq" onclick="setQuakes()">🌏 地震</button>
   <button id="bEqHist" onclick="setHistEq()">🧊 地震の板</button>
+  <button id="bTohoku" onclick="setTohoku()">🗾 東北スラブ</button>
   <button id="bVol" onclick="setVolcanoes()">🌋 火山</button>
   <button id="bPlate" onclick="setPlates()">🗺️ プレート</button>
   <button id="bSST" onclick="setSST()">🌡️ 水温</button>
@@ -288,6 +289,10 @@ function clearNewModes(){
   if(histEqTimer){ try{ clearInterval(histEqTimer); }catch(_){} histEqTimer=null; }
   if(histEqPrim){ try{ viewer.scene.primitives.remove(histEqPrim); }catch(_){} histEqPrim=null; }
   histEqPts=null; histEqColors=null;
+  if(tkTimer){ try{ clearInterval(tkTimer); }catch(_){} tkTimer=null; }
+  if(tkPrim){ try{ viewer.scene.primitives.remove(tkPrim); }catch(_){} tkPrim=null; }
+  tkPts=null; tkTimes=null; tkColorIdx=null; tkFlash=[];
+  if(tkCoastSrc){ try{ viewer.dataSources.remove(tkCoastSrc,true); }catch(_){} tkCoastSrc=null; }
   { const by=document.getElementById('eqBigYear'); if(by) by.style.display='none'; }
   try{ viewer.scene.globe.translucency.enabled=false; }catch(_){}  // 半透明地球を元に戻す
 }
@@ -1165,6 +1170,95 @@ function setHistEq(){
     setErr(null);
     setTimeout(histEqPlayPause, 600); // 自動再生開始
   }).catch(e=>setErr('地震データの取得失敗: '+(e&&e.message||e)));
+}
+
+// ===== 東北スラブ（別枠）: 東北沖 M1+ 高密度・単一の沈み込む太平洋プレートを断面で =====
+// データ: 気象庁 一元化震源を東北沖(35-42N/138-146E)に限定・バイナリ同梱(quakes_tohoku.bin)
+var tkPrim=null,tkTimer=null,tkPts=null,tkSizes=null,tkTimes=null,tkColorIdx=null,tkMag=null,tkPalette=null,tkBuf=null,tkN=0,tkIdx=0,tkShown=0,tkMagMin=20,tkT=0,tkT0=0,tkT1=0,tkPlaying=false,tkFlash=[],tkCoastSrc=null;
+const TK_EXAG=4.0, TK_DEPMAX=700, TK_FLASHN=9; const _tkl=new Cesium.Color();
+function tkColOf(i){ return tkPalette[tkColorIdx[i]]; }
+async function tkCoast(){
+  try{ const j=await (await fetch('japan_coast.json')).json(); const src=new Cesium.CustomDataSource('tkcoast');
+    const col=Cesium.Color.fromCssColorString('#5fd0ff').withAlpha(0.85);
+    for(const seg of j.segs){ src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArray(seg.flat()), width:1.2, material:col, arcType:Cesium.ArcType.GEODESIC } }); }
+    tkCoastSrc=src; viewer.dataSources.add(src);
+  }catch(e){}
+}
+async function tkLoad(){
+  if(!tkBuf) tkBuf=await (await fetch('quakes_tohoku.bin')).arrayBuffer();
+  const dv=new DataView(tkBuf), n=Math.floor(tkBuf.byteLength/11);
+  tkPalette=[]; for(let k=0;k<64;k++) tkPalette.push(depthColor(k/63*TK_DEPMAX));
+  tkPrim=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+  tkTimes=new Float64Array(n); tkColorIdx=new Uint8Array(n); tkSizes=new Float32Array(n); tkMag=new Uint8Array(n); tkPts=new Array(n); tkFlash=[]; tkN=n;
+  let o=0;
+  for(let i=0;i<n;i++){
+    const t=dv.getUint32(o,true), lat=dv.getUint16(o+4,true)/1000+20, lon=dv.getUint16(o+6,true)/1000+120, dep=dv.getUint16(o+8,true)/10, m10=dv.getUint8(o+10); o+=11; const mag=m10/10;
+    tkTimes[i]=t; tkMag[i]=m10; tkColorIdx[i]=Math.max(0,Math.min(63,Math.round(dep/TK_DEPMAX*63)));
+    tkSizes[i]=Math.max(1.6,Math.min(9,(mag-1.2)*1.5));
+    tkPts[i]=tkPrim.add({ position:Cesium.Cartesian3.fromDegrees(lon,lat,-dep*1000*TK_EXAG), pixelSize:tkSizes[i], color:Cesium.Color.TRANSPARENT, outlineWidth:0  });
+  }
+  tkT0=tkTimes[0]; tkT1=tkTimes[n-1];
+}
+function tkDecay(){ if(!tkFlash.length) return; const keep=[]; for(const fl of tkFlash){ fl.age++; const f=fl.age/TK_FLASHN,i=fl.i;
+  if(f>=1){ tkPts[i].color=tkColOf(i); tkPts[i].pixelSize=tkSizes[i]; }
+  else{ Cesium.Color.lerp(Cesium.Color.WHITE,tkColOf(i),f,_tkl); tkPts[i].color=Cesium.Color.clone(_tkl); tkPts[i].pixelSize=Math.max(3.5,tkSizes[i]*(4.0-2.4*f)); keep.push(fl); } } tkFlash=keep; }
+function tkSettle(){ for(const fl of tkFlash){ tkPts[fl.i].color=tkColOf(fl.i); tkPts[fl.i].pixelSize=tkSizes[fl.i]; } tkFlash=[]; }
+function tkRender(flash){
+  while(tkIdx<tkN && tkTimes[tkIdx]<=tkT){
+    if(tkMag[tkIdx]>=tkMagMin){ if(flash){ tkPts[tkIdx].color=Cesium.Color.WHITE; tkPts[tkIdx].pixelSize=Math.max(3.5,tkSizes[tkIdx]*4.0); tkFlash.push({i:tkIdx,age:0}); } else tkPts[tkIdx].color=tkColOf(tkIdx); tkShown++; }
+    tkIdx++;
+  }
+  if(flash) tkDecay();
+  const yr=eqYear(tkT); const sl=document.getElementById('tkSlider'); if(sl)sl.value=tkT;
+  const by=document.getElementById('eqBigYear'); if(by)by.textContent=yr; document.getElementById('cnt').textContent=tkShown.toLocaleString();
+}
+function tkSetTime(t,flash){ tkSettle(); if(t<tkT){ for(let i=0;i<tkIdx;i++){ tkPts[i].color=Cesium.Color.TRANSPARENT; tkPts[i].pixelSize=tkSizes[i]; } tkIdx=0; tkShown=0; } tkT=t; tkRender(flash); }
+function tkPlayPause(){ const b=document.getElementById('tkPlay');
+  if(tkPlaying){ tkPlaying=false; if(b)b.textContent='▶'; if(tkTimer){clearInterval(tkTimer);tkTimer=null;} tkSettle(); return; }
+  tkPlaying=true; if(b)b.textContent='⏸'; if(tkT>=tkT1) tkSetTime(tkT0,false);
+  const SPAN=tkT1-tkT0, STEP=SPAN/600;
+  tkTimer=setInterval(()=>{ tkT=Math.min(tkT1,tkT+STEP); tkRender(true);
+    if(tkT>=tkT1){ clearInterval(tkTimer); tkTimer=null; tkPlaying=false; const bb=document.getElementById('tkPlay'); if(bb)bb.textContent='▶'; tkSettle(); } }, 50);
+}
+function tkSeek(v){ if(tkTimer){clearInterval(tkTimer);tkTimer=null;tkPlaying=false;const b=document.getElementById('tkPlay');if(b)b.textContent='▶';} tkSetTime(+v,false); }
+function setTkMag(m10){ tkMagMin=m10; tkSettle(); for(let i=0;i<tkIdx;i++){ tkPts[i].color=Cesium.Color.TRANSPARENT; tkPts[i].pixelSize=tkSizes[i]; } tkIdx=0; tkShown=0; tkRender(false);
+  document.querySelectorAll('#tkMagBar button').forEach(b=>b.classList.toggle('on',+b.dataset.m===m10)); }
+function setTohoku(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto=null; refreshPhotoButtons();
+  const btn=document.getElementById('bTohoku'); if(btn)btn.classList.add('on');
+  setModeLbl('東北スラブ'); clearStarlink(); setBasemap('dark'); // clearNewModes 実行
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  tkIdx=0; tkShown=0; tkT=0; tkMagMin=20;
+  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
+  setErr('東北沖の地震（1983〜・約115万件）を読み込み中…');
+  tkCoast();
+  // 東北中心に引き俯瞰（深部の点が地球の縁から見える＝全国版と同じ確実な構成）
+  viewer.camera.flyToBoundingSphere(
+    new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(141,38,-200000*TK_EXAG), 1.0e6),
+    { offset:new Cesium.HeadingPitchRange(Cesium.Math.toRadians(300), Cesium.Math.toRadians(-24), 4.0e6), duration:1.6 });
+  tkLoad().then(()=>{
+    viewer.scene.globe.translucency.enabled=true;
+    viewer.scene.globe.translucency.frontFaceAlpha=0.28;
+    const mb2=document.getElementById('modebar');
+    mb2.innerHTML=`<button id="tkPlay" onclick="tkPlayPause()">▶</button>`
+      +`<input id="tkSlider" type="range" min="${tkT0}" max="${tkT1}" value="${tkT0}" step="86400" oninput="tkSeek(this.value)" style="width:180px;vertical-align:middle">`
+      +`<span id="tkMagBar" style="margin-left:6px">下限:`
+        +`<button data-m="10" onclick="setTkMag(10)">全部</button>`
+        +`<button data-m="20" class="on" onclick="setTkMag(20)">M2</button>`
+        +`<button data-m="30" onclick="setTkMag(30)">M3</button>`
+        +`<button data-m="40" onclick="setTkMag(40)">M4</button>`
+      +`</span>`;
+    mb2.style.display='flex';
+    { const by=document.getElementById('eqBigYear'); if(by) by.style.display='block'; }
+    tkSetTime(tkT0,false);
+    document.getElementById('upd').textContent='東北スラブ：東北沖 1983〜2023 '+tkN.toLocaleString()+'件。単一の沈み込む太平洋プレートを高密度で。▶で再生・色=深さ(浅赤→深青)/大きさ=規模・出典 気象庁 一元化震源';
+    setErr(null);
+    setTimeout(tkPlayPause, 600);
+  }).catch(e=>setErr('東北データの取得失敗: '+(e&&e.message||e)));
 }
 
 setLive();
