@@ -93,6 +93,7 @@
   <span id="wxTime">–</span>
 </div>
 <div id="err"></div>
+<div id="eqBigYear" style="display:none;position:absolute;top:14%;left:50%;transform:translateX(-50%);font:bold 72px system-ui,sans-serif;color:rgba(255,255,255,0.92);text-shadow:0 2px 12px rgba(0,0,0,0.8);letter-spacing:2px;pointer-events:none;z-index:5"></div>
 <script>
 const SUPA = "https://iisatjsohjknjldpjslb.supabase.co";
 const KEY  = "sb_publishable_JeYLiw0skEB5v5byzQYhEQ_WHZ-I-zJ";
@@ -287,6 +288,7 @@ function clearNewModes(){
   if(histEqTimer){ try{ clearInterval(histEqTimer); }catch(_){} histEqTimer=null; }
   if(histEqPrim){ try{ viewer.scene.primitives.remove(histEqPrim); }catch(_){} histEqPrim=null; }
   histEqPts=null; histEqColors=null;
+  { const by=document.getElementById('eqBigYear'); if(by) by.style.display='none'; }
   try{ viewer.scene.globe.translucency.enabled=false; }catch(_){}  // 半透明地球を元に戻す
 }
 // 雨雲アニメ ON/OFF。ON中はライブ機を止めて雨雲に集中、OFFでライブへ戻す
@@ -1084,8 +1086,8 @@ async function loadHistEq(){
   for(const [t,lat,lon,dep,mag] of histEqData){
     const pos=Cesium.Cartesian3.fromDegrees(lon,lat,-dep*1000*EQ_EXAG); // 深さ方向（地下）へ
     const col=depthColor(dep); histEqColors.push(col);
-    const pt=histEqPrim.add({ position:pos, pixelSize:Math.max(2.5, Math.min(22, (mag-3)*3.2)),
-      color:Cesium.Color.TRANSPARENT, outlineColor:Cesium.Color.BLACK.withAlpha(0.4), outlineWidth:0.4 });
+    const pt=histEqPrim.add({ position:pos, pixelSize:Math.max(1.3, Math.min(9, (mag-3.6)*1.8)), // 小さめ＝板が見やすい
+      color:Cesium.Color.TRANSPARENT, outlineWidth:0 });
     histEqPts.push(pt);
   }
   histEqT0=histEqData[0][0]; histEqT1=histEqData[histEqData.length-1][0];
@@ -1097,6 +1099,7 @@ function histEqRender(){ // curT(=histEqT) 以下を可視化（累積・消え�
   const yr=eqYear(histEqT);
   const sl=document.getElementById('eqSlider'); if(sl) sl.value=histEqT;
   const lb=document.getElementById('eqYear'); if(lb) lb.textContent=yr+'年';
+  const by=document.getElementById('eqBigYear'); if(by) by.textContent=yr;
   document.getElementById('cnt').textContent=histEqIdx.toLocaleString();
 }
 function histEqSetTime(t){ // スクラブ：巻き戻し時は全消し→再構築
@@ -1139,6 +1142,7 @@ function setHistEq(){
       +`<input id="eqSlider" type="range" min="${histEqT0}" max="${histEqT1}" value="${histEqT0}" step="86400" oninput="histEqSeek(this.value)" style="width:200px;vertical-align:middle">`
       +`<span id="eqYear" style="margin-left:8px;font-weight:bold">1975年</span>`;
     mb2.style.display='flex';
+    { const by=document.getElementById('eqBigYear'); if(by) by.style.display='block'; }
     histEqSetTime(histEqT0);
     document.getElementById('upd').textContent='地震の板：1975〜現在 M4+ '+histEqData.length.toLocaleString()+'件を深さ×時系列で。▶で再生すると沈み込む太平洋プレートが板状に浮かぶ・色=深さ(浅赤→深青)/大きさ=規模・出典 USGS';
     setErr(null);
