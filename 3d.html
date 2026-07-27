@@ -267,7 +267,7 @@ function setBasemap(mode){
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null;
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
-var histEqPrim=null, histEqTimer=null, histEqPts=null, histEqSizes=null, histEqTimes=null, histEqColorIdx=null, histEqMag=null, histEqPalette=null, histEqBuf=null, histEqN=0, histEqIdx=0, histEqShown=0, histEqMagMin=20, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[], eqCoastSrc=null;
+var histEqPrim=null, histEqTimer=null, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[];
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
 const WLV={ // 高度別: 表示名・高度表記・粒子の浮遊高度(m)・風速スケール(m/s)
   '250hPa':{lbl:'巡航',ft:'約34,000ft',alt:10360,vmax:70},
@@ -287,8 +287,7 @@ function clearNewModes(){
   windParticles=null; windGrid=null; windGridAll=null;
   if(histEqTimer){ try{ clearInterval(histEqTimer); }catch(_){} histEqTimer=null; }
   if(histEqPrim){ try{ viewer.scene.primitives.remove(histEqPrim); }catch(_){} histEqPrim=null; }
-  histEqPts=null; histEqTimes=null; histEqColorIdx=null;
-  if(eqCoastSrc){ try{ viewer.dataSources.remove(eqCoastSrc,true); }catch(_){} eqCoastSrc=null; }
+  histEqPts=null; histEqColors=null;
   { const by=document.getElementById('eqBigYear'); if(by) by.style.display='none'; }
   try{ viewer.scene.globe.translucency.enabled=false; }catch(_){}  // 半透明地球を元に戻す
 }
@@ -1075,41 +1074,23 @@ function setWindLevel(v){
 
 // ===== 地震の板（1975〜現在 M4+ を深さ×時系列で3D可視化・沈み込むスラブが浮かぶ）=====
 // データ: USGS歴史アーカイブをリポジトリ同梱（earthquakes.json）。深さ方向に誇張プロット＋半透明地球で地下を見せる。
-const EQ_EXAG=4.0;   // 深さの誇張倍率（沈み込む板を見やすく）
+const EQ_EXAG=3.0;   // 深さの誇張倍率（沈み込む板を見やすく）
 function eqYear(sec){ return new Date(sec*1000).getUTCFullYear(); }
-const EQ_DEPMAX=700; // 色パレットの深さ上限(km)
-function eqColOf(i){ return histEqPalette[histEqColorIdx[i]]; }
-// 日本域の海岸線を明るい線で重ねる（暗い地球でも列島の形が分かる）
-async function loadEqCoast(){
-  try{
-    const j=await (await fetch('japan_coast.json')).json();
-    const src=new Cesium.CustomDataSource('eqcoast');
-    const col=Cesium.Color.fromCssColorString('#5fd0ff').withAlpha(0.85);
-    for(const seg of j.segs){
-      src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArray(seg.flat()),
-        width:1.2, material:col, arcType:Cesium.ArcType.GEODESIC, clampToGround:false } });
-    }
-    eqCoastSrc=src; viewer.dataSources.add(src);
-  }catch(e){ /* 海岸線は装飾なので失敗しても続行 */ }
-}
 async function loadHistEq(){
-  if(!histEqBuf) histEqBuf=await (await fetch('quakes_jma.bin')).arrayBuffer();
-  const dv=new DataView(histEqBuf), n=Math.floor(histEqBuf.byteLength/11);
-  histEqPalette=[]; for(let k=0;k<64;k++) histEqPalette.push(depthColor(k/63*EQ_DEPMAX)); // 深さ→色 64段パレット
-  histEqPrim=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
-  histEqTimes=new Float64Array(n); histEqColorIdx=new Uint8Array(n); histEqSizes=new Float32Array(n); histEqMag=new Uint8Array(n);
-  histEqPts=new Array(n); histEqFlash=[]; histEqN=n;
-  let o=0;
-  for(let i=0;i<n;i++){
-    const t=dv.getUint32(o,true), lat=dv.getUint16(o+4,true)/1000+20, lon=dv.getUint16(o+6,true)/1000+120;
-    const dep=dv.getUint16(o+8,true)/10, m10=dv.getUint8(o+10); o+=11; const mag=m10/10;
-    histEqTimes[i]=t; histEqMag[i]=m10;
-    histEqColorIdx[i]=Math.max(0,Math.min(63,Math.round(dep/EQ_DEPMAX*63)));
-    histEqSizes[i]=Math.max(1.8, Math.min(10, (mag-1.2)*1.5)); // 密度が伝わるよう少し大きめ
-    histEqPts[i]=histEqPrim.add({ position:Cesium.Cartesian3.fromDegrees(lon,lat,-dep*1000*EQ_EXAG),
-      pixelSize:histEqSizes[i], color:Cesium.Color.TRANSPARENT, outlineWidth:0 });
+  if(!histEqData){
+    const j=await (await fetch('earthquakes.json')).json();
+    histEqData=j.e; // [ [t(epoch秒),lat,lon,depth_km,mag], ... ] 時系列ソート済み
   }
-  histEqT0=histEqTimes[0]; histEqT1=histEqTimes[n-1];
+  histEqPrim=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+  histEqPts=[]; histEqColors=[]; histEqSizes=[]; histEqFlash=[];
+  for(const [t,lat,lon,dep,mag] of histEqData){
+    const pos=Cesium.Cartesian3.fromDegrees(lon,lat,-dep*1000*EQ_EXAG); // 深さ方向（地下）へ
+    const col=depthColor(dep); histEqColors.push(col);
+    const sz=Math.max(1.3, Math.min(9, (mag-3.6)*1.8)); histEqSizes.push(sz); // 小さめ＝板が見やすい
+    const pt=histEqPrim.add({ position:pos, pixelSize:sz, color:Cesium.Color.TRANSPARENT, outlineWidth:0 });
+    histEqPts.push(pt);
+  }
+  histEqT0=histEqData[0][0]; histEqT1=histEqData[histEqData.length-1][0];
 }
 const EQ_FLASHN=9; // 出現スパークの持続フレーム数
 const _wl=new Cesium.Color();
@@ -1118,19 +1099,16 @@ function histEqDecayFlash(){ // 出現直後の点を白→深さ色へフェー
   const keep=[];
   for(const fl of histEqFlash){
     fl.age++; const f=fl.age/EQ_FLASHN, i=fl.i;
-    if(f>=1){ histEqPts[i].color=eqColOf(i); histEqPts[i].pixelSize=histEqSizes[i]; }
-    else{ Cesium.Color.lerp(Cesium.Color.WHITE, eqColOf(i), f, _wl);
+    if(f>=1){ histEqPts[i].color=histEqColors[i]; histEqPts[i].pixelSize=histEqSizes[i]; }
+    else{ Cesium.Color.lerp(Cesium.Color.WHITE, histEqColors[i], f, _wl);
       histEqPts[i].color=Cesium.Color.clone(_wl); histEqPts[i].pixelSize=Math.max(3.5, histEqSizes[i]*(4.0-2.4*f)); keep.push(fl); }
   }
   histEqFlash=keep;
 }
 function histEqRender(flash){ // curT(=histEqT) 以下を可視化（累積・消えない）
-  while(histEqIdx<histEqN && histEqTimes[histEqIdx]<=histEqT){
-    if(histEqMag[histEqIdx]>=histEqMagMin){ // マグニチュード・フィルタ
-      if(flash){ histEqPts[histEqIdx].color=Cesium.Color.WHITE; histEqPts[histEqIdx].pixelSize=Math.max(3.5,histEqSizes[histEqIdx]*4.0); histEqFlash.push({i:histEqIdx,age:0}); }
-      else{ histEqPts[histEqIdx].color=eqColOf(histEqIdx); }
-      histEqShown++;
-    }
+  while(histEqIdx<histEqData.length && histEqData[histEqIdx][0]<=histEqT){
+    if(flash){ histEqPts[histEqIdx].color=Cesium.Color.WHITE; histEqPts[histEqIdx].pixelSize=Math.max(3.5,histEqSizes[histEqIdx]*4.0); histEqFlash.push({i:histEqIdx,age:0}); }
+    else{ histEqPts[histEqIdx].color=histEqColors[histEqIdx]; }
     histEqIdx++;
   }
   if(flash) histEqDecayFlash();
@@ -1138,33 +1116,22 @@ function histEqRender(flash){ // curT(=histEqT) 以下を可視化（累積・�
   const sl=document.getElementById('eqSlider'); if(sl) sl.value=histEqT;
   const lb=document.getElementById('eqYear'); if(lb) lb.textContent=yr+'年';
   const by=document.getElementById('eqBigYear'); if(by) by.textContent=yr;
-  document.getElementById('cnt').textContent=histEqShown.toLocaleString();
-}
-function histEqSettleFlash(){ // 保留中のスパークを最終色へ確定（停止・シーク時）
-  for(const fl of histEqFlash){ histEqPts[fl.i].color=eqColOf(fl.i); histEqPts[fl.i].pixelSize=histEqSizes[fl.i]; }
-  histEqFlash=[];
+  document.getElementById('cnt').textContent=histEqIdx.toLocaleString();
 }
 function histEqSetTime(t,flash){ // スクラブ：巻き戻し時は全消し→再構築
-  histEqSettleFlash();
-  if(t<histEqT){ for(let i=0;i<histEqIdx;i++){ histEqPts[i].color=Cesium.Color.TRANSPARENT; histEqPts[i].pixelSize=histEqSizes[i]; } histEqIdx=0; histEqShown=0; }
+  if(t<histEqT){ for(let i=0;i<histEqIdx;i++){ histEqPts[i].color=Cesium.Color.TRANSPARENT; histEqPts[i].pixelSize=histEqSizes[i]; } histEqIdx=0; histEqFlash=[]; }
   histEqT=t; histEqRender(flash);
-}
-function setEqMag(m10){ // マグニチュード下限を切替（全部↔M4+）。現在時刻まで新フィルタで再構築
-  histEqMagMin=m10; histEqSettleFlash();
-  for(let i=0;i<histEqIdx;i++){ histEqPts[i].color=Cesium.Color.TRANSPARENT; histEqPts[i].pixelSize=histEqSizes[i]; }
-  histEqIdx=0; histEqShown=0; histEqRender(false); // histEqT(現在時刻)まで新フィルタで再描画
-  document.querySelectorAll('#eqMagBar button').forEach(b=>b.classList.toggle('on', +b.dataset.m===m10));
 }
 function histEqPlayPause(){
   const b=document.getElementById('eqPlay');
-  if(histEqPlaying){ histEqPlaying=false; if(b)b.textContent='▶'; if(histEqTimer){clearInterval(histEqTimer);histEqTimer=null;} histEqSettleFlash(); return; }
+  if(histEqPlaying){ histEqPlaying=false; if(b)b.textContent='▶'; if(histEqTimer){clearInterval(histEqTimer);histEqTimer=null;} return; }
   histEqPlaying=true; if(b)b.textContent='⏸';
-  if(histEqT>=histEqT1) histEqSetTime(histEqT0,false); // 終端なら頭出し
+  if(histEqT>=histEqT1) histEqSetTime(histEqT0); // 終端なら頭出し
   const SPAN=histEqT1-histEqT0, STEP=SPAN/600; // 約30秒(50ms×600)で全期間
   histEqTimer=setInterval(()=>{
     histEqT=Math.min(histEqT1, histEqT+STEP); histEqRender(true); // 再生中はスパーク付きで出現
     if(histEqT>=histEqT1){ clearInterval(histEqTimer); histEqTimer=null; histEqPlaying=false; const bb=document.getElementById('eqPlay'); if(bb)bb.textContent='▶';
-      for(const fl of histEqFlash){ histEqPts[fl.i].color=eqColOf(fl.i); histEqPts[fl.i].pixelSize=histEqSizes[fl.i]; } histEqFlash=[]; } // 残スパークを最終色へ
+      for(const fl of histEqFlash){ histEqPts[fl.i].color=histEqColors[fl.i]; histEqPts[fl.i].pixelSize=histEqSizes[fl.i]; } histEqFlash=[]; } // 残スパークを最終色へ
   }, 50);
 }
 function histEqSeek(v){ if(histEqTimer){clearInterval(histEqTimer);histEqTimer=null; histEqPlaying=false; const b=document.getElementById('eqPlay'); if(b)b.textContent='▶';} histEqSetTime(+v,false); }
@@ -1177,32 +1144,24 @@ function setHistEq(){
   setModeLbl('地震の板'); clearStarlink(); setBasemap('dark'); // clearNewModes 実行
   viewer.clock.shouldAnimate=false;
   viewer.entities.removeAll(); plateVecEnts=[];
-  histEqIdx=0; histEqShown=0; histEqT=0; histEqMagMin=25; // 既定M2.5＝板が見やすい
+  histEqIdx=0; histEqT=0;
   const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
-  setErr('地震の履歴（1983〜・約238万件）を読み込み中…');
-  loadEqCoast();  // 日本列島の海岸線（明るい水色）を重ねる
+  setErr('地震の履歴（1975〜）を読み込み中…');
   // 日本のスラブ領域を斜め横から見て、沈み込む板（西へ深くなる）が見えるアングル
   viewer.camera.flyToBoundingSphere(
     new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(140,37,-200000*EQ_EXAG), 1.4e6),
     { offset:new Cesium.HeadingPitchRange(Cesium.Math.toRadians(300), Cesium.Math.toRadians(-24), 4.0e6), duration:1.6 });
   loadHistEq().then(()=>{
     viewer.scene.globe.translucency.enabled=true;          // 地球を半透明に→地下の震源が透けて見える
-    viewer.scene.globe.translucency.frontFaceAlpha=0.28;
+    viewer.scene.globe.translucency.frontFaceAlpha=0.36;
     const mb2=document.getElementById('modebar');
     mb2.innerHTML=`<button id="eqPlay" onclick="histEqPlayPause()">▶</button>`
-      +`<input id="eqSlider" type="range" min="${histEqT0}" max="${histEqT1}" value="${histEqT0}" step="86400" oninput="histEqSeek(this.value)" style="width:180px;vertical-align:middle">`
-      +`<span id="eqYear" style="margin:0 8px;font-weight:bold">1983年</span>`
-      +`<span id="eqMagBar" style="margin-left:6px">下限:`
-        +`<button data-m="10" onclick="setEqMag(10)">全部</button>`
-        +`<button data-m="20" onclick="setEqMag(20)">M2</button>`
-        +`<button data-m="25" class="on" onclick="setEqMag(25)">M2.5</button>`
-        +`<button data-m="30" onclick="setEqMag(30)">M3</button>`
-        +`<button data-m="40" onclick="setEqMag(40)">M4</button>`
-      +`</span>`;
+      +`<input id="eqSlider" type="range" min="${histEqT0}" max="${histEqT1}" value="${histEqT0}" step="86400" oninput="histEqSeek(this.value)" style="width:200px;vertical-align:middle">`
+      +`<span id="eqYear" style="margin-left:8px;font-weight:bold">1975年</span>`;
     mb2.style.display='flex';
     { const by=document.getElementById('eqBigYear'); if(by) by.style.display='block'; }
     histEqSetTime(histEqT0,false);
-    document.getElementById('upd').textContent='地震の板：1983〜2023 '+histEqN.toLocaleString()+'件（下限で密度切替）。▶で沈み込む太平洋プレートが板状に浮かぶ・色=深さ(浅赤→深青)/大きさ=規模・出典 気象庁 一元化震源';
+    document.getElementById('upd').textContent='地震の板：1975〜現在 M4+ '+histEqData.length.toLocaleString()+'件を深さ×時系列で。▶で再生すると沈み込む太平洋プレートが板状に浮かぶ・色=深さ(浅赤→深青)/大きさ=規模・出典 USGS';
     setErr(null);
     setTimeout(histEqPlayPause, 600); // 自動再生開始
   }).catch(e=>setErr('地震データの取得失敗: '+(e&&e.message||e)));
