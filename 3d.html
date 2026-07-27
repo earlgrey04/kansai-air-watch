@@ -1136,17 +1136,12 @@ function histEqPlayPause(){
   if(histEqPlaying){ histEqStop(); return; }
   histEqPlaying=true; const b=document.getElementById('eqPlay'); if(b)b.textContent='⏸';
   if(histEqT>=histEqT1) histEqSetTime(histEqT0,false); // 終端なら頭出し
-  const SPAN=histEqT1-histEqT0, RATE=SPAN/30000; // 全期間を約30秒（実時間msあたりの進み量）
-  histEqLastTs=histEqNow();
-  const loop=(ts)=>{ // requestAnimationFrame：実時間ベースで進める（フレーム落ち・停止に強い）
-    if(!histEqPlaying) return;
-    const dt=Math.min(250, ts-histEqLastTs); histEqLastTs=ts; // 大きな中断は250msに丸めて飛びを防ぐ
-    histEqT=Math.min(histEqT1, histEqT+RATE*dt); histEqRender(true);
+  const SPAN=histEqT1-histEqT0, STEP=SPAN/600; // 約30秒(50ms×600)。setInterval＝タブ非表示でも進む(rAFは止まる)
+  histEqTimer=setInterval(()=>{
+    histEqT=Math.min(histEqT1, histEqT+STEP); histEqRender(true);
     if(histEqT>=histEqT1){ histEqStop();
-      for(const fl of histEqFlash){ histEqPts[fl.i].color=histEqColors[fl.i]; histEqPts[fl.i].pixelSize=histEqSizes[fl.i]; } histEqFlash=[]; return; }
-    histEqRaf=requestAnimationFrame(loop);
-  };
-  histEqRaf=requestAnimationFrame(loop);
+      for(const fl of histEqFlash){ histEqPts[fl.i].color=histEqColors[fl.i]; } histEqFlash=[]; } // 残スパークを最終色へ
+  }, 50);
 }
 function histEqSeek(v){ histEqStop(); histEqSetTime(+v,false); }
 function setHistEq(){
