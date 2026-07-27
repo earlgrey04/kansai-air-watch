@@ -268,7 +268,7 @@ function setBasemap(mode){
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null;
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
-var histEqPrim=null, histEqTimer=null, histEqRaf=null, histEqLastTs=0, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[];
+var histEqPrim=null, histEqTimer=null, histEqRaf=null, histEqLastTs=0, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[], eqCoastSrc=null;
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
 const WLV={ // 高度別: 表示名・高度表記・粒子の浮遊高度(m)・風速スケール(m/s)
   '250hPa':{lbl:'巡航',ft:'約34,000ft',alt:10360,vmax:70},
@@ -290,6 +290,7 @@ function clearNewModes(){
   if(histEqRaf){ try{ cancelAnimationFrame(histEqRaf); }catch(_){} histEqRaf=null; } histEqPlaying=false;
   if(histEqPrim){ try{ viewer.scene.primitives.remove(histEqPrim); }catch(_){} histEqPrim=null; }
   histEqPts=null; histEqColors=null;
+  if(eqCoastSrc){ try{ viewer.dataSources.remove(eqCoastSrc,true); }catch(_){} eqCoastSrc=null; }
   if(tkTimer){ try{ clearInterval(tkTimer); }catch(_){} tkTimer=null; }
   if(tkPrim){ try{ viewer.scene.primitives.remove(tkPrim); }catch(_){} tkPrim=null; }
   tkPts=null; tkTimes=null; tkColorIdx=null; tkFlash=[];
@@ -1144,6 +1145,14 @@ function histEqPlayPause(){
   }, 50);
 }
 function histEqSeek(v){ histEqStop(); histEqSetTime(+v,false); }
+async function loadEqCoast(){ // 日本列島の海岸線を +40km 浮かせて明るく重ねる（震源群の中で日本の位置がわかる）
+  try{ const j=await (await fetch('japan_coast.json')).json();
+    const src=new Cesium.CustomDataSource('eqcoast'); const col=Cesium.Color.fromCssColorString('#7fe0ff');
+    for(const seg of j.segs){ const pts=[]; for(const [lo,la] of seg){ pts.push(lo,la,40000); }
+      src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pts), width:2, material:col, arcType:Cesium.ArcType.GEODESIC } }); }
+    eqCoastSrc=src; viewer.dataSources.add(src);
+  }catch(e){}
+}
 function setHistEq(){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
@@ -1156,6 +1165,7 @@ function setHistEq(){
   histEqIdx=0; histEqT=0;
   const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
   setErr('地震の履歴（1975〜）を読み込み中…');
+  loadEqCoast();  // 日本列島の海岸線（明るい水色）を重ねて位置がわかるように
   // 日本のスラブ領域を斜め横から見て、沈み込む板（西へ深くなる）が見えるアングル
   viewer.camera.flyToBoundingSphere(
     new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(140,37,-200000*EQ_EXAG), 1.4e6),
