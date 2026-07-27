@@ -268,7 +268,7 @@ function setBasemap(mode){
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null;
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
-var histEqPrim=null, histEqTimer=null, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[];
+var histEqPrim=null, histEqTimer=null, histEqRaf=null, histEqLastTs=0, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[];
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
 const WLV={ // 高度別: 表示名・高度表記・粒子の浮遊高度(m)・風速スケール(m/s)
   '250hPa':{lbl:'巡航',ft:'約34,000ft',alt:10360,vmax:70},
@@ -287,6 +287,7 @@ function clearNewModes(){
   if(windPrim){ try{ viewer.scene.primitives.remove(windPrim); }catch(_){} windPrim=null; }
   windParticles=null; windGrid=null; windGridAll=null;
   if(histEqTimer){ try{ clearInterval(histEqTimer); }catch(_){} histEqTimer=null; }
+  if(histEqRaf){ try{ cancelAnimationFrame(histEqRaf); }catch(_){} histEqRaf=null; } histEqPlaying=false;
   if(histEqPrim){ try{ viewer.scene.primitives.remove(histEqPrim); }catch(_){} histEqPrim=null; }
   histEqPts=null; histEqColors=null;
   if(tkTimer){ try{ clearInterval(tkTimer); }catch(_){} tkTimer=null; }
@@ -1097,13 +1098,14 @@ async function loadHistEq(){
   }
   histEqT0=histEqData[0][0]; histEqT1=histEqData[histEqData.length-1][0];
 }
-const EQ_FLASHN=9; // 出現スパークの持続フレーム数
+const EQ_FLASH_MS=450; // 出現スパークの持続時間(ms)＝フレームレート非依存
 const _wl=new Cesium.Color();
-function histEqDecayFlash(){ // 出現直後の点を白→深さ色へフェード（密集域でも新規がわかる）
+function histEqNow(){ return (typeof performance!=='undefined'&&performance.now)?performance.now():Date.now(); }
+function histEqDecayFlash(now){ // 出現直後の点を白→深さ色へフェード（密集域でも新規がわかる）
   if(!histEqFlash.length) return;
   const keep=[];
   for(const fl of histEqFlash){
-    fl.age++; const f=fl.age/EQ_FLASHN, i=fl.i;
+    const f=(now-fl.born)/EQ_FLASH_MS, i=fl.i;
     if(f>=1){ histEqPts[i].color=histEqColors[i]; histEqPts[i].pixelSize=histEqSizes[i]; }
     else{ Cesium.Color.lerp(Cesium.Color.WHITE, histEqColors[i], f, _wl);
       histEqPts[i].color=Cesium.Color.clone(_wl); histEqPts[i].pixelSize=Math.max(3.5, histEqSizes[i]*(4.0-2.4*f)); keep.push(fl); }
@@ -1111,12 +1113,13 @@ function histEqDecayFlash(){ // 出現直後の点を白→深さ色へフェー
   histEqFlash=keep;
 }
 function histEqRender(flash){ // curT(=histEqT) 以下を可視化（累積・消えない）
+  const now=histEqNow();
   while(histEqIdx<histEqData.length && histEqData[histEqIdx][0]<=histEqT){
-    if(flash){ histEqPts[histEqIdx].color=Cesium.Color.WHITE; histEqPts[histEqIdx].pixelSize=Math.max(3.5,histEqSizes[histEqIdx]*4.0); histEqFlash.push({i:histEqIdx,age:0}); }
+    if(flash){ histEqPts[histEqIdx].color=Cesium.Color.WHITE; histEqPts[histEqIdx].pixelSize=Math.max(3.5,histEqSizes[histEqIdx]*4.0); histEqFlash.push({i:histEqIdx,born:now}); }
     else{ histEqPts[histEqIdx].color=histEqColors[histEqIdx]; }
     histEqIdx++;
   }
-  if(flash) histEqDecayFlash();
+  if(flash) histEqDecayFlash(now);
   const yr=eqYear(histEqT);
   const sl=document.getElementById('eqSlider'); if(sl) sl.value=histEqT;
   const lb=document.getElementById('eqYear'); if(lb) lb.textContent=yr+'年';
@@ -1127,19 +1130,27 @@ function histEqSetTime(t,flash){ // スクラブ：巻き戻し時は全消し�
   if(t<histEqT){ for(let i=0;i<histEqIdx;i++){ histEqPts[i].color=Cesium.Color.TRANSPARENT; histEqPts[i].pixelSize=histEqSizes[i]; } histEqIdx=0; histEqFlash=[]; }
   histEqT=t; histEqRender(flash);
 }
-function histEqPlayPause(){
-  const b=document.getElementById('eqPlay');
-  if(histEqPlaying){ histEqPlaying=false; if(b)b.textContent='▶'; if(histEqTimer){clearInterval(histEqTimer);histEqTimer=null;} return; }
-  histEqPlaying=true; if(b)b.textContent='⏸';
-  if(histEqT>=histEqT1) histEqSetTime(histEqT0); // 終端なら頭出し
-  const SPAN=histEqT1-histEqT0, STEP=SPAN/600; // 約30秒(50ms×600)で全期間
-  histEqTimer=setInterval(()=>{
-    histEqT=Math.min(histEqT1, histEqT+STEP); histEqRender(true); // 再生中はスパーク付きで出現
-    if(histEqT>=histEqT1){ clearInterval(histEqTimer); histEqTimer=null; histEqPlaying=false; const bb=document.getElementById('eqPlay'); if(bb)bb.textContent='▶';
-      for(const fl of histEqFlash){ histEqPts[fl.i].color=histEqColors[fl.i]; histEqPts[fl.i].pixelSize=histEqSizes[fl.i]; } histEqFlash=[]; } // 残スパークを最終色へ
-  }, 50);
+function histEqStop(){ // 再生停止（rAF/旧setInterval両方を確実に解除）
+  histEqPlaying=false; if(histEqRaf){ cancelAnimationFrame(histEqRaf); histEqRaf=null; } if(histEqTimer){ clearInterval(histEqTimer); histEqTimer=null; }
+  const b=document.getElementById('eqPlay'); if(b)b.textContent='▶';
 }
-function histEqSeek(v){ if(histEqTimer){clearInterval(histEqTimer);histEqTimer=null; histEqPlaying=false; const b=document.getElementById('eqPlay'); if(b)b.textContent='▶';} histEqSetTime(+v,false); }
+function histEqPlayPause(){
+  if(histEqPlaying){ histEqStop(); return; }
+  histEqPlaying=true; const b=document.getElementById('eqPlay'); if(b)b.textContent='⏸';
+  if(histEqT>=histEqT1) histEqSetTime(histEqT0,false); // 終端なら頭出し
+  const SPAN=histEqT1-histEqT0, RATE=SPAN/30000; // 全期間を約30秒（実時間msあたりの進み量）
+  histEqLastTs=histEqNow();
+  const loop=(ts)=>{ // requestAnimationFrame：実時間ベースで進める（フレーム落ち・停止に強い）
+    if(!histEqPlaying) return;
+    const dt=Math.min(250, ts-histEqLastTs); histEqLastTs=ts; // 大きな中断は250msに丸めて飛びを防ぐ
+    histEqT=Math.min(histEqT1, histEqT+RATE*dt); histEqRender(true);
+    if(histEqT>=histEqT1){ histEqStop();
+      for(const fl of histEqFlash){ histEqPts[fl.i].color=histEqColors[fl.i]; histEqPts[fl.i].pixelSize=histEqSizes[fl.i]; } histEqFlash=[]; return; }
+    histEqRaf=requestAnimationFrame(loop);
+  };
+  histEqRaf=requestAnimationFrame(loop);
+}
+function histEqSeek(v){ histEqStop(); histEqSetTime(+v,false); }
 function setHistEq(){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
