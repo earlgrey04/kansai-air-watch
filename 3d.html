@@ -69,6 +69,7 @@
   <button id="bWx" onclick="toggleWeather()">☁️ 雨雲</button>
   <button id="bLtn" onclick="toggleLightning()">⚡ 雷</button>
   <button id="bEq" onclick="setQuakes()">🌏 地震</button>
+  <button id="bEqHist" onclick="setHistEq()">🧊 地震の板</button>
   <button id="bVol" onclick="setVolcanoes()">🌋 火山</button>
   <button id="bPlate" onclick="setPlates()">🗺️ プレート</button>
   <button id="bSST" onclick="setSST()">🌡️ 水温</button>
@@ -265,6 +266,7 @@ function setBasemap(mode){
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null;
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
+var histEqPrim=null, histEqTimer=null, histEqPts=null, histEqColors=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false;
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
 const WLV={ // 高度別: 表示名・高度表記・粒子の浮遊高度(m)・風速スケール(m/s)
   '250hPa':{lbl:'巡航',ft:'約34,000ft',alt:10360,vmax:70},
@@ -282,6 +284,10 @@ function clearNewModes(){
   if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
   if(windPrim){ try{ viewer.scene.primitives.remove(windPrim); }catch(_){} windPrim=null; }
   windParticles=null; windGrid=null; windGridAll=null;
+  if(histEqTimer){ try{ clearInterval(histEqTimer); }catch(_){} histEqTimer=null; }
+  if(histEqPrim){ try{ viewer.scene.primitives.remove(histEqPrim); }catch(_){} histEqPrim=null; }
+  histEqPts=null; histEqColors=null;
+  try{ viewer.scene.globe.translucency.enabled=false; }catch(_){}  // 半透明地球を元に戻す
 }
 // 雨雲アニメ ON/OFF。ON中はライブ機を止めて雨雲に集中、OFFでライブへ戻す
 async function toggleWeather(){
@@ -1062,6 +1068,82 @@ function setWindLevel(v){
   windLevel=v; stopWindParticles(); windLevelBar();      // ボタンのon状態を即反映（カメラは動かさない）
   if(windGridAll && windGridAll[v]){ windGrid=windGridAll[v]; startWind(); windLabel(); } // キャッシュから即時（再fetchなし）
   else loadAndStartWind();
+}
+
+// ===== 地震の板（1975〜現在 M4+ を深さ×時系列で3D可視化・沈み込むスラブが浮かぶ）=====
+// データ: USGS歴史アーカイブをリポジトリ同梱（earthquakes.json）。深さ方向に誇張プロット＋半透明地球で地下を見せる。
+const EQ_EXAG=3.0;   // 深さの誇張倍率（沈み込む板を見やすく）
+function eqYear(sec){ return new Date(sec*1000).getUTCFullYear(); }
+async function loadHistEq(){
+  if(!histEqData){
+    const j=await (await fetch('earthquakes.json')).json();
+    histEqData=j.e; // [ [t(epoch秒),lat,lon,depth_km,mag], ... ] 時系列ソート済み
+  }
+  histEqPrim=viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+  histEqPts=[]; histEqColors=[];
+  for(const [t,lat,lon,dep,mag] of histEqData){
+    const pos=Cesium.Cartesian3.fromDegrees(lon,lat,-dep*1000*EQ_EXAG); // 深さ方向（地下）へ
+    const col=depthColor(dep); histEqColors.push(col);
+    const pt=histEqPrim.add({ position:pos, pixelSize:Math.max(2.5, Math.min(22, (mag-3)*3.2)),
+      color:Cesium.Color.TRANSPARENT, outlineColor:Cesium.Color.BLACK.withAlpha(0.4), outlineWidth:0.4 });
+    histEqPts.push(pt);
+  }
+  histEqT0=histEqData[0][0]; histEqT1=histEqData[histEqData.length-1][0];
+}
+function histEqRender(){ // curT(=histEqT) 以下を可視化（累積・消えない）
+  while(histEqIdx<histEqData.length && histEqData[histEqIdx][0]<=histEqT){
+    histEqPts[histEqIdx].color=histEqColors[histEqIdx]; histEqIdx++;
+  }
+  const yr=eqYear(histEqT);
+  const sl=document.getElementById('eqSlider'); if(sl) sl.value=histEqT;
+  const lb=document.getElementById('eqYear'); if(lb) lb.textContent=yr+'年';
+  document.getElementById('cnt').textContent=histEqIdx.toLocaleString();
+}
+function histEqSetTime(t){ // スクラブ：巻き戻し時は全消し→再構築
+  if(t<histEqT){ for(let i=0;i<histEqIdx;i++) histEqPts[i].color=Cesium.Color.TRANSPARENT; histEqIdx=0; }
+  histEqT=t; histEqRender();
+}
+function histEqPlayPause(){
+  const b=document.getElementById('eqPlay');
+  if(histEqPlaying){ histEqPlaying=false; if(b)b.textContent='▶'; if(histEqTimer){clearInterval(histEqTimer);histEqTimer=null;} return; }
+  histEqPlaying=true; if(b)b.textContent='⏸';
+  if(histEqT>=histEqT1) histEqSetTime(histEqT0); // 終端なら頭出し
+  const SPAN=histEqT1-histEqT0, STEP=SPAN/600; // 約30秒(50ms×600)で全期間
+  histEqTimer=setInterval(()=>{
+    histEqT=Math.min(histEqT1, histEqT+STEP); histEqRender();
+    if(histEqT>=histEqT1){ clearInterval(histEqTimer); histEqTimer=null; histEqPlaying=false; const bb=document.getElementById('eqPlay'); if(bb)bb.textContent='▶'; }
+  }, 50);
+}
+function histEqSeek(v){ if(histEqTimer){clearInterval(histEqTimer);histEqTimer=null; histEqPlaying=false; const b=document.getElementById('eqPlay'); if(b)b.textContent='▶';} histEqSetTime(+v); }
+function setHistEq(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto=null; refreshPhotoButtons();
+  const btn=document.getElementById('bEqHist'); if(btn)btn.classList.add('on');
+  setModeLbl('地震の板'); clearStarlink(); setBasemap('dark'); // clearNewModes 実行
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  histEqIdx=0; histEqT=0;
+  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
+  setErr('地震の履歴（1975〜）を読み込み中…');
+  // 日本のスラブ領域を斜め横から見て、沈み込む板（西へ深くなる）が見えるアングル
+  viewer.camera.flyToBoundingSphere(
+    new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(140,37,-200000*EQ_EXAG), 1.4e6),
+    { offset:new Cesium.HeadingPitchRange(Cesium.Math.toRadians(300), Cesium.Math.toRadians(-24), 4.0e6), duration:1.6 });
+  loadHistEq().then(()=>{
+    viewer.scene.globe.translucency.enabled=true;          // 地球を半透明に→地下の震源が透けて見える
+    viewer.scene.globe.translucency.frontFaceAlpha=0.36;
+    const mb2=document.getElementById('modebar');
+    mb2.innerHTML=`<button id="eqPlay" onclick="histEqPlayPause()">▶</button>`
+      +`<input id="eqSlider" type="range" min="${histEqT0}" max="${histEqT1}" value="${histEqT0}" step="86400" oninput="histEqSeek(this.value)" style="width:200px;vertical-align:middle">`
+      +`<span id="eqYear" style="margin-left:8px;font-weight:bold">1975年</span>`;
+    mb2.style.display='flex';
+    histEqSetTime(histEqT0);
+    document.getElementById('upd').textContent='地震の板：1975〜現在 M4+ '+histEqData.length.toLocaleString()+'件を深さ×時系列で。▶で再生すると沈み込む太平洋プレートが板状に浮かぶ・色=深さ(浅赤→深青)/大きさ=規模・出典 USGS';
+    setErr(null);
+    setTimeout(histEqPlayPause, 600); // 自動再生開始
+  }).catch(e=>setErr('地震データの取得失敗: '+(e&&e.message||e)));
 }
 
 setLive();
