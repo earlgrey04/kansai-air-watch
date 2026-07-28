@@ -1135,8 +1135,10 @@ function histEqPlayPause(){
   const SPAN=histEqT1-histEqT0, STEP=SPAN/600; // 約30秒(50ms×600)。setInterval＝タブ非表示でも進む(rAFは止まる)
   histEqTimer=setInterval(()=>{
     histEqT=Math.min(histEqT1, histEqT+STEP); histEqRender(true);
+    try{ viewer.scene.requestRender(); }catch(_){}   // 各tickで明示再描画＝ライブでも描画が止まらない
     if(histEqT>=histEqT1){ histEqStop();
-      for(const fl of histEqFlash){ histEqPts[fl.i].color=histEqColors[fl.i]; } histEqFlash=[]; } // 残スパークを最終色へ
+      for(const fl of histEqFlash){ histEqPts[fl.i].color=histEqColors[fl.i]; } histEqFlash=[];
+      try{ viewer.scene.requestRender(); }catch(_){} } // 残スパークを最終色へ
   }, 50);
 }
 function histEqSeek(v){ histEqStop(); histEqSetTime(+v,false); }
@@ -1182,6 +1184,18 @@ function setHistEq(){
   }).catch(e=>setErr('地震データの取得失敗: '+(e&&e.message||e)));
 }
 
+
+// カメラをコピー（cキー）＝今の視点コードをクリップボードへ。動画に完全一致で反映できる
+window.addEventListener('keydown', function(e){
+  if((e.key==='c'||e.key==='C') && !e.ctrlKey && !e.metaKey){
+    try{
+      const p=viewer.camera.position;
+      const code='CAM|'+p.x.toFixed(1)+'|'+p.y.toFixed(1)+'|'+p.z.toFixed(1)+'|'+viewer.camera.heading.toFixed(5)+'|'+viewer.camera.pitch.toFixed(5)+'|'+viewer.camera.roll.toFixed(5);
+      if(navigator.clipboard) navigator.clipboard.writeText(code);
+      setErr('📋 今のアングルをコピーしました。このコードを貼り付けてください → '+code);
+    }catch(err){ setErr('カメラ取得失敗: '+err); }
+  }
+});
 
 setLive();
 </script>
