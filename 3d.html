@@ -1145,11 +1145,12 @@ function histEqPlayPause(){
   }, 50);
 }
 function histEqSeek(v){ histEqStop(); histEqSetTime(+v,false); }
-async function loadEqCoast(){ // 日本列島の海岸線を +40km 浮かせて明るく重ねる（震源群の中で日本の位置がわかる）
+async function loadEqCoast(){ // 日本列島の海岸線を浮かせて重ねる（depthFailMaterial＝地球に隠れず常に見える）
   try{ const j=await (await fetch('japan_coast.json')).json();
-    const src=new Cesium.CustomDataSource('eqcoast'); const col=Cesium.Color.fromCssColorString('#7fe0ff');
-    for(const seg of j.segs){ const pts=[]; for(const [lo,la] of seg){ pts.push(lo,la,40000); }
-      src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pts), width:2, material:col, arcType:Cesium.ArcType.GEODESIC } }); }
+    const src=new Cesium.CustomDataSource('eqcoast'); const col=Cesium.Color.fromCssColorString('#8fefff');
+    for(const seg of j.segs){ const pts=[]; for(const [lo,la] of seg){ pts.push(lo,la,100000); }
+      src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pts), width:2.5,
+        material:col, depthFailMaterial:col, arcType:Cesium.ArcType.GEODESIC } }); }
     eqCoastSrc=src; viewer.dataSources.add(src);
   }catch(e){}
 }
