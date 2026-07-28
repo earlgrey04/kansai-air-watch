@@ -73,6 +73,7 @@
   <button id="bVol" onclick="setVolcanoes()">🌋 火山</button>
   <button id="bPlate" onclick="setPlates()">🗺️ プレート</button>
   <button id="bSST" onclick="setSST()">🌡️ 水温</button>
+  <button id="bFault" onclick="setFaults()">🗺️ 活断層</button>
   <button id="bCable" onclick="setCables()">🔌 海底ケーブル</button>
   <button id="bWind" onclick="setWind()">🌬️ 上空の風</button>
   <button onclick="setSatellites()">🛰️ 衛星</button>
@@ -265,7 +266,7 @@ function setBasemap(mode){
   if(lightningOn && mode!=='dark') loadLightning(); // 雷ナウキャストを上に復元
 }
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
-var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null;
+var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null, faultSrc=null;
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
 var histEqPrim=null, histEqTimer=null, histEqRaf=null, histEqLastTs=0, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[], eqCoastSrc=null;
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
@@ -280,6 +281,7 @@ function clearNewModes(){
   if(plateVecEnts && plateVecEnts.length){ for(const e of plateVecEnts){ try{ viewer.entities.remove(e); }catch(_){} } }
   plateVecEnts=[];
   if(sstLayer){ try{ viewer.imageryLayers.remove(sstLayer); }catch(_){} sstLayer=null; }
+  if(faultSrc){ try{ viewer.dataSources.remove(faultSrc,true); }catch(_){} faultSrc=null; }
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
   if(landingSrc){ try{ viewer.dataSources.remove(landingSrc,true); }catch(_){} landingSrc=null; }
   if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
@@ -886,6 +888,35 @@ function setPlates(){
 
 // ===== 海面水温（NASA GIBS / GHRSST MUR・海の暖流/寒流が色で見える）=====
 function sstDate(){ const d=new Date(Date.now()-3*24*3600e3); return d.toISOString().slice(0,10); } // 3日前(配信済み)
+// ===== 活断層（GEM Global Active Faults の日本分を Esri実写の上に赤線で重ねる）=====
+async function loadFaults(){
+  try{
+    const j=await (await fetch('japan_faults.json')).json();
+    const src=new Cesium.CustomDataSource('faults'); const col=Cesium.Color.fromCssColorString('#ff3b30');
+    for(const seg of j.segs){ const pts=[]; for(const [lo,la] of seg){ pts.push(lo,la,2000); }
+      src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pts), width:2,
+        material:col, depthFailMaterial:col, clampToGround:false, arcType:Cesium.ArcType.GEODESIC } }); }
+    faultSrc=src; viewer.dataSources.add(src);
+    document.getElementById('cnt').textContent=j.segs.length+' 本';
+    document.getElementById('upd').textContent='日本の活断層（赤い線）を実写地図に重ねて表示・出典 GEM Global Active Fault Database (CC BY-SA 4.0)';
+    setErr(null);
+  }catch(e){ setErr('活断層データの取得失敗: '+(e&&e.message||e)); }
+}
+function setFaults(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto='esri'; refreshPhotoButtons();               // 下地はEsri実写
+  const btn=document.getElementById('bFault'); if(btn)btn.classList.add('on');
+  setModeLbl('活断層'); clearStarlink(); setBasemap('dark'); // esri優先で実写ベース／clearNewModesで前回分を掃除
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
+  setErr('活断層データを読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(138,37,2.0e6),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-72),roll:0}, duration:1.5 });
+  loadFaults();
+}
 function setSST(){
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
