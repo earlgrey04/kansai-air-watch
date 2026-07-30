@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v45-zai-panel</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v46-pvt-visible</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -143,7 +143,7 @@
 <div id="zaiPanel">
   <span class="hd">🚆 在来線 運行情報 <span id="zaiUpd"></span></span>
   <div id="zaiList"></div>
-  <span class="hd">🟢平常 🟡お知らせ 🟠遅れ 🔴見合わせ・運休 ／ 行クリックで路線へ移動<br>
+  <span class="hd">🟢平常 🟡お知らせ 🟠遅れ 🔴見合わせ・運休 🩵私鉄など(情報対象外) ／ 行クリックで路線へ移動<br>
   公式:
   <a href="https://www3.jrhokkaido.co.jp/webunkou/" target="_blank" rel="noopener">JR北</a>・
   <a href="https://traininfo.jreast.co.jp/train_info/" target="_blank" rel="noopener">JR東</a>・
@@ -1296,8 +1296,8 @@ function applyZaiStatus(){
     e.show=true;
     const s=zaiLineState(li);
     const col=Cesium.Color.fromCssColorString(
-      s.st==='nostat' ? '#5f7fa6' : (SHINK_COLOR[s.st]||SHINK_COLOR.unknown));
-    const alpha=li.co?0.9:(s.st==='normal'||s.st==='nostat'?0.45:0.9);
+      s.st==='nostat' ? '#8fd0ff' : (SHINK_COLOR[s.st]||SHINK_COLOR.unknown));
+    const alpha=li.co?0.9:(s.st==='normal'?0.75:(s.st==='nostat'?0.85:0.9));
     e.polyline.material=col.withAlpha(alpha);
     e.polyline.depthFailMaterial=col.withAlpha(alpha*0.45);
     e.description=`<div style="font-size:13px"><b>${shinkEsc(li.n)}</b>（${shinkEsc(li.op)}）<br>`+
@@ -1312,7 +1312,7 @@ function applyZaiStatus(){
   if(counts.delay) parts.push(`遅れ ${counts.delay}`);
   if(counts.info) parts.push(`お知らせ ${counts.info}`);
   upd.textContent=`在来線 運行状況 ${ts}時点 ─ ${parts.length?parts.join(' / ')+'路線':'JR全線平常運転'}`+
-    '（一覧は右下パネル・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
+    '（JR=状態色・水色=私鉄など(運行情報対象外)・一覧は右下パネル・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
   renderZaiPanel();
   try{ viewer.scene.requestRender(); }catch(_){}
 }
@@ -1336,7 +1336,7 @@ async function loadZairaisen(){
         const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,1200); }
         const e=src.entities.add({ name:`${ln.n}（${ln.op}）`,
           polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
-            width:ln.co?2.4:1.3, material:Cesium.Color.GRAY,
+            width:ln.co?2.4:1.7, material:Cesium.Color.GRAY,
             clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
         e._zaiLine={ n:ln.n, op:ln.op, co:ln.co, _first:first };
         first=false;
