@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>新幹線運行マップ｜全国の新幹線 運行状況</title>
+<meta name="description" content="全国の新幹線10路線の経路と現在の運行状況（平常・遅れ・運転見合わせ）を日本地図上に表示します。">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root {
+    --bg: #0e1116; --panel: rgba(17, 22, 30, .92); --border: #2a3342;
+    --text: #e6edf3; --muted: #8b98a9;
+    --c-normal: #2ecc71; --c-info: #f1c40f; --c-delay: #f39c12;
+    --c-suspend: #e74c3c; --c-unknown: #7f8c9b;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif; }
+  #map { position: absolute; inset: 0; background: #0e1116; }
+  .leaflet-container { font: inherit; }
+
+  #panel { position: absolute; top: 10px; right: 10px; z-index: 1000;
+    width: 300px; max-height: calc(100% - 20px); display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    backdrop-filter: blur(6px); box-shadow: 0 4px 24px rgba(0,0,0,.5); overflow: hidden; }
+  #panel header { padding: 10px 14px 8px; border-bottom: 1px solid var(--border); }
+  #panel h1 { margin: 0; font-size: 15px; letter-spacing: .04em; }
+  #panel h1 .em { color: #6ec6ff; }
+  #updated { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  #updated .err { color: var(--c-delay); }
+  #lines { overflow-y: auto; padding: 6px 0; flex: 1; }
+  .line-row { display: flex; align-items: flex-start; gap: 9px; padding: 7px 14px;
+    cursor: pointer; border-left: 3px solid transparent; }
+  .line-row:hover { background: rgba(255,255,255,.05); border-left-color: #6ec6ff; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; margin-top: 3px; flex: none;
+    box-shadow: 0 0 6px currentColor; }
+  .line-name { font-size: 13px; font-weight: 600; }
+  .line-name small { color: var(--muted); font-weight: 400; margin-left: 5px; font-size: 10px; }
+  .line-status { font-size: 11.5px; margin-top: 1px; }
+  .line-detail { font-size: 10.5px; color: var(--muted); margin-top: 1px;
+    line-height: 1.35; word-break: break-all; }
+  #panel footer { padding: 7px 14px 9px; border-top: 1px solid var(--border);
+    font-size: 9.5px; color: var(--muted); line-height: 1.5; }
+  #panel footer a { color: #6ea8d8; text-decoration: none; }
+
+  #basemapCtl { position: absolute; bottom: 22px; left: 10px; z-index: 1000;
+    display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 9px; padding: 4px; }
+  #basemapCtl button { background: none; border: none; color: var(--muted);
+    font: inherit; font-size: 11.5px; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+  #basemapCtl button.on { background: #2b5f8f; color: #fff; }
+
+  #toggleBtn { display: none; }
+  @media (max-width: 640px) {
+    #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto;
+      max-height: 46%; border-radius: 14px 14px 0 0; }
+    #basemapCtl { bottom: auto; top: 10px; }
+    #toggleBtn { display: block; position: absolute; right: 12px; top: 8px;
+      background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+  }
+  .st-normal { color: var(--c-normal); } .st-info { color: var(--c-info); }
+  .st-delay { color: var(--c-delay); } .st-suspend { color: var(--c-suspend); }
+  .st-unknown { color: var(--c-unknown); }
+  .leaflet-tooltip.station-tip { background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); font-size: 11px; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel);
+    color: var(--text); }
+  @keyframes blink { 50% { opacity: .25; } }
+  .blink { animation: blink 1.1s linear infinite; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="panel">
+  <header>
+    <h1>🚄 <span class="em">新幹線</span>運行マップ</h1>
+    <div id="updated">読み込み中…</div>
+    <button id="toggleBtn" title="折りたたみ">▾</button>
+  </header>
+  <div id="lines"></div>
+  <footer>
+    経路: <a href="https://nlftp.mlit.go.jp/ksj/" target="_blank" rel="noopener">国土数値情報(N02-24)</a>を加工 ／
+    運行情報: JR北海道・JR東日本・JR東海・JR西日本・JR九州の各公開情報(自動取得・目安) ／
+    地図: Esri ｜ 公式の運行情報を必ずご確認ください
+  </footer>
+</div>
+
+<div id="basemapCtl">
+  <button data-b="dark" class="on">ダーク</button>
+  <button data-b="topo">地形</button>
+  <button data-b="sat">衛星</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+'use strict';
+
+const STATUS_COLOR = { normal: '#2ecc71', info: '#f1c40f', delay: '#f39c12',
+                       suspend: '#e74c3c', unknown: '#7f8c9b' };
+// 北から順に表示
+const LINE_ORDER = ['hokkaido', 'tohoku', 'akita', 'yamagata', 'joetsu',
+                    'hokuriku', 'tokaido', 'sanyo', 'kyushu', 'nishikyushu'];
+
+// GitHub Pages配信時はActionsが更新するstatusブランチの生JSONを優先
+const STATUS_URLS = [
+  'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/shinkansen_status.json',
+  'shinkansen_status.json',
+];
+
+const JAPAN_BOUNDS = [[30.8, 129.0], [45.9, 146.0]];
+const fitPad = () => window.innerWidth > 640
+  ? { paddingBottomRight: [310, 0] } : { paddingBottomRight: [0, Math.round(window.innerHeight * .40)] };
+const map = L.map('map', { zoomControl: true, attributionControl: true })
+  .fitBounds(JAPAN_BOUNDS, fitPad());
+map.attributionControl.setPrefix(false);
+
+const esri = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+const esriAttr = 'Tiles &copy; Esri';
+const basemaps = {
+  dark: L.layerGroup([
+    L.tileLayer(esri + 'Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 16, attribution: esriAttr }),
+    L.tileLayer(esri + 'Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 16 }),
+  ]),
+  topo: L.layerGroup([
+    L.tileLayer(esri + 'World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 18, attribution: esriAttr }),
+  ]),
+  sat: L.layerGroup([
+    L.tileLayer(esri + 'World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 18, attribution: esriAttr }),
+    L.tileLayer(esri + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 18 }),
+  ]),
+};
+let curBase = basemaps.dark.addTo(map);
+document.querySelectorAll('#basemapCtl button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#basemapCtl button').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    map.removeLayer(curBase);
+    curBase = basemaps[btn.dataset.b].addTo(map);
+  });
+});
+
+const lineLayers = {};   // key -> {casing:[], stroke:[], bounds}
+const stationLayer = L.layerGroup();
+let linesData = null;
+
+function toLatLng(coords) { return coords.map(c => [c[1], c[0]]); }
+
+function drawLines(data) {
+  linesData = data;
+  for (const [key, ln] of Object.entries(data.lines)) {
+    const casing = [], stroke = [];
+    let bounds = null;
+    const dash = ln.type === 'mini' ? '6 7' : null;
+    for (const seg of ln.coords) {
+      const ll = toLatLng(seg);
+      casing.push(L.polyline(ll, { color: '#000', opacity: .55,
+        weight: ln.type === 'mini' ? 5.5 : 7, interactive: false }).addTo(map));
+      const s = L.polyline(ll, { color: STATUS_COLOR.unknown,
+        weight: ln.type === 'mini' ? 2.5 : 3.5, opacity: .95, dashArray: dash });
+      s.bindTooltip(ln.name, { sticky: true, className: 'station-tip' });
+      s.on('click', () => showPopup(key));
+      s.addTo(map);
+      stroke.push(s);
+      bounds = bounds ? bounds.extend(s.getBounds()) : s.getBounds();
+    }
+    lineLayers[key] = { casing, stroke, bounds, name: ln.name, operator: ln.operator };
+  }
+  for (const st of data.stations) {
+    const m = L.circleMarker([st.c[1], st.c[0]], { radius: 3, color: '#fff',
+      weight: 1, fillColor: '#9fc9ff', fillOpacity: .9 });
+    m.bindTooltip(`${st.n}（${st.l}）`, { className: 'station-tip' });
+    stationLayer.addLayer(m);
+  }
+  const syncStations = () => {
+    if (map.getZoom() >= 7) { if (!map.hasLayer(stationLayer)) map.addLayer(stationLayer); }
+    else if (map.hasLayer(stationLayer)) map.removeLayer(stationLayer);
+  };
+  map.on('zoomend', syncStations);
+  syncStations();
+}
+
+let statusData = null;
+function showPopup(key) {
+  const ll = lineLayers[key];
+  const st = statusData && statusData.lines[key];
+  if (!ll) return;
+  const stHtml = st
+    ? `<div class="line-status st-${st.status}">●&nbsp;${st.label}</div>
+       <div class="line-detail">${escapeHtml(st.text || '')}</div>
+       <div class="line-detail">情報源: ${escapeHtml(st.source || '')}</div>`
+    : '';
+  L.popup({ maxWidth: 260 })
+    .setLatLng(ll.bounds.getCenter())
+    .setContent(`<div class="line-name">${ll.name}<small>${ll.operator}</small></div>${stHtml}`)
+    .openOn(map);
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, m =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+function applyStatus(data) {
+  statusData = data;
+  for (const [key, ll] of Object.entries(lineLayers)) {
+    const st = data.lines[key] || { status: 'unknown' };
+    const color = STATUS_COLOR[st.status] || STATUS_COLOR.unknown;
+    for (const s of ll.stroke) {
+      s.setStyle({ color });
+      const el = s.getElement();
+      if (el) el.classList.toggle('blink', st.status === 'suspend');
+    }
+  }
+  renderPanel(data);
+}
+
+function renderPanel(data) {
+  const box = document.getElementById('lines');
+  box.innerHTML = '';
+  for (const key of LINE_ORDER) {
+    const ll = lineLayers[key];
+    const st = data.lines[key] || { status: 'unknown', label: '情報なし', text: '' };
+    if (!ll) continue;
+    const row = document.createElement('div');
+    row.className = 'line-row';
+    row.innerHTML = `
+      <div class="dot" style="background:${STATUS_COLOR[st.status]};color:${STATUS_COLOR[st.status]}"></div>
+      <div>
+        <div class="line-name">${ll.name}<small>${ll.operator}</small></div>
+        <div class="line-status st-${st.status}">${st.label}</div>
+        ${st.status !== 'normal' && st.text ? `<div class="line-detail">${escapeHtml(st.text)}</div>` : ''}
+      </div>`;
+    row.addEventListener('click', () => {
+      map.fitBounds(ll.bounds.pad(0.15));
+      showPopup(key);
+    });
+    box.appendChild(row);
+  }
+  const up = document.getElementById('updated');
+  const t = data.updated ? new Date(data.updated) : null;
+  const ts = t ? `${t.getMonth() + 1}/${t.getDate()} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : '--';
+  const stale = t && (Date.now() - t.getTime()) > 60 * 60 * 1000;
+  up.innerHTML = `運行情報 ${ts} 時点${stale ? ' <span class="err">(更新が古い可能性)</span>' : ''}` +
+    (data.errors && data.errors.length ? ' <span class="err">(一部取得失敗)</span>' : '');
+}
+
+async function fetchStatus() {
+  for (const url of STATUS_URLS) {
+    try {
+      const r = await fetch(url + (url.startsWith('http') ? `?t=${Date.now()}` : ''), { cache: 'no-store' });
+      if (!r.ok) continue;
+      return await r.json();
+    } catch (e) { /* 次の候補へ */ }
+  }
+  return null;
+}
+
+async function init() {
+  const linesRes = await fetch('shinkansen_lines.json');
+  drawLines(await linesRes.json());
+  const st = await fetchStatus();
+  if (st) applyStatus(st);
+  else document.getElementById('updated').innerHTML =
+    '<span class="err">運行情報を取得できませんでした</span>';
+}
+init();
+setInterval(async () => {
+  const st = await fetchStatus();
+  if (st) applyStatus(st);
+}, 5 * 60 * 1000);
+
+document.getElementById('toggleBtn').addEventListener('click', () => {
+  const el = document.getElementById('lines');
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+});
+</script>
+</body>
+</html>

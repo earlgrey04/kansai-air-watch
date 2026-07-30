@@ -1,0 +1,66 @@
+{
+ "updated": "2026-07-30T13:13:37+09:00",
+ "lines": {
+  "hokkaido": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR北海道",
+   "label": "平常運転"
+  },
+  "tohoku": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "label": "平常運転"
+  },
+  "yamagata": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "label": "平常運転"
+  },
+  "akita": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "label": "平常運転"
+  },
+  "joetsu": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "label": "平常運転"
+  },
+  "hokuriku": {
+   "status": "delay",
+   "text": "JR東日本区間: 平常運転 / JR西日本区間: 遅れ見込み(接続待ち合わせ)",
+   "source": "JR東日本・JR西日本",
+   "label": "遅れあり"
+  },
+  "tokaido": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東海",
+   "label": "平常運転"
+  },
+  "sanyo": {
+   "status": "info",
+   "text": "お知らせ(地震)",
+   "source": "JR西日本",
+   "label": "お知らせあり"
+  },
+  "kyushu": {
+   "status": "info",
+   "text": "＜令和8年 熊本地震に伴う運行状況について＞",
+   "source": "JR九州",
+   "label": "お知らせあり"
+  },
+  "nishikyushu": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR九州",
+   "label": "平常運転"
+  }
+ },
+ "errors": []
+}

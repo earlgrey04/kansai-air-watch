@@ -1,0 +1,30 @@
+name: shinkansen-status
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: shinkansen-status
+  cancel-in-progress: true
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch status
+        run: python3 scripts/fetch_shinkansen_status.py
+      - name: push to status branch
+        run: |
+          mkdir -p /tmp/out && cp shinkansen_status.json /tmp/out/
+          cd /tmp/out
+          git init -q -b status
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add shinkansen_status.json
+          git commit -q -m "update shinkansen status"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
