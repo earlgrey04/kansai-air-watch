@@ -77,11 +77,19 @@
   #warnLegend3 .chip { display:inline-block; width:18px; height:5px; border-radius:3px;
     margin-right:6px; vertical-align:middle; }
   #warnLegend3 .hd { font-size:10.5px; color:#9fb8d6; }
+  /* 🌊津波トグル(独立オーバーレイ) */
+  #bTsu.tsu-on { background:#0e5a7a; color:#bfe9ff; font-weight:700; }
+  #tsuLegend3 { display:none; position:absolute; left:10px; bottom:410px; z-index:10;
+    background:rgba(10,30,50,.85); color:#dfeaff; border:1px solid #29496b; border-radius:10px;
+    padding:8px 12px; font:11px/1.75 system-ui,sans-serif; max-width:250px; }
+  #tsuLegend3 .chip { display:inline-block; width:18px; height:5px; border-radius:3px;
+    margin-right:6px; vertical-align:middle; }
+  #tsuLegend3 .hd { font-size:10.5px; color:#9fb8d6; }
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v43-typhoon-anim</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v44-zairaisen-tsunami</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -98,6 +106,8 @@
   <button id="bSST" onclick="setSST()">🌡️ 水温</button>
   <button id="bFault" onclick="setFaults()">🗺️ 活断層</button>
   <button id="bShink" onclick="setShinkansen()">🚄 新幹線</button>
+  <button id="bZai" onclick="setZairaisen()">🚆 在来線</button>
+  <button id="bTsu" onclick="toggleTsunami()">🌊 津波</button>
   <button id="bTy" onclick="setTyphoon()">🌀 台風</button>
   <button id="bCable" onclick="setCables()">🔌 海底ケーブル</button>
   <button id="bWind" onclick="setWind()">🌬️ 上空の風</button>
@@ -119,6 +129,14 @@
   <span id="wxTime">–</span>
 </div>
 <div id="err"></div>
+<div id="tsuLegend3">
+  <span class="hd">津波情報(気象庁)</span><br>
+  <span class="chip" style="background:#c800ff"></span>大津波警報<br>
+  <span class="chip" style="background:#ff2800"></span>津波警報<br>
+  <span class="chip" style="background:#f2e700"></span>津波注意報<br>
+  <span class="chip" style="background:#00aaff"></span>津波予報(海面変動)<br>
+  <span class="hd" id="tsuNote3">読み込み中…</span>
+</div>
 <div id="warnLegend3">
   <span class="hd">警報・注意報(気象庁)</span><br>
   <span class="chip" style="background:#0c000c;border:1px solid #666"></span>特別警報(レベル5)<br>
@@ -319,6 +337,8 @@ function setBasemap(mode){
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null, faultSrc=null;
 var shinkSrc=null, shinkStTimer=null, shinkLineEnts=null, shinkLinesData=null, shinkSectionEnts=[];
 var tySrc=null, tyHistSrc=null, tyTimer=null, tyHistData=null, tyDecade=null;
+var zaiSrc=null, zaiTimer=null, zaiData=null, zaiStatus=null, zaiJrOnly=false;
+var tsuOn=false, tsuSrc=null, tsuAreas=null, tsuTimer=null, tsuBusy=false;
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
 var histEqPrim=null, histEqTimer=null, histEqRaf=null, histEqLastTs=0, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[], eqCoastSrc=null;
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
@@ -341,6 +361,8 @@ function clearNewModes(){
   if(tyTimer){ try{ clearInterval(tyTimer); }catch(_){} tyTimer=null; }
   tyDecade=null;
   try{ tyStopAnim(); }catch(_){}
+  if(zaiSrc){ try{ viewer.dataSources.remove(zaiSrc,true); }catch(_){} zaiSrc=null; }
+  if(zaiTimer){ try{ clearInterval(zaiTimer); }catch(_){} zaiTimer=null; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
   { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='none'; }
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
@@ -1179,6 +1201,221 @@ function setShinkansen(){
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(136.5,32.2,2.45e6),
     orientation:{heading:0,pitch:Cesium.Math.toRadians(-78),roll:0}, duration:1.5 });
   loadShinkansen();
+}
+
+// ===== 在来線（N02全鉄道＋JR6社の運行情報、私鉄は取得可能な場合のみ） =====
+const ZAI_STATUS_URLS=[
+  { url:'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/zairaisen_status.json?ref=status',
+    opts:{ headers:{ 'Accept':'application/vnd.github.raw+json' } } },
+  { url:'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/zairaisen_status.json', bust:true },
+  { url:'zairaisen_status.json' },
+];
+function zaiNorm(name){
+  let n=(name||'').replace(/[\s　]/g,'').replace(/（[^）]*）|\([^)]*\)/g,'');
+  return n.replace(/本線$/,'線');
+}
+async function fetchZaiStatus(){
+  for(const s of ZAI_STATUS_URLS){
+    try{
+      const u=s.bust ? s.url+'?t='+Date.now() : s.url;
+      const r=await fetch(u,{ cache:'no-store', ...(s.opts||{}) });
+      if(r.ok) return await r.json();
+    }catch(_){}
+  }
+  return null;
+}
+function zaiLineState(ln){
+  const key=(ln.co?ln.co:'pvt')+':'+zaiNorm(ln.n);
+  const ent=zaiStatus&&zaiStatus.lines&&zaiStatus.lines[key];
+  if(ent) return { st:ent.st, text:ent.text };
+  const ok=zaiStatus&&zaiStatus.ok||[];
+  if(ln.co) return ok.includes(ln.co)? { st:'normal', text:'平常運転' } : { st:'unknown', text:'情報取得失敗' };
+  return ok.includes('pvt')? { st:'normal', text:'遅延情報なし(主要線のみ・目安)' } : { st:'nostat', text:'運行情報の取得対象外' };
+}
+function applyZaiStatus(){
+  if(!zaiSrc||!zaiData) return;
+  const counts={ suspend:0, delay:0, info:0 };
+  for(const e of zaiSrc.entities.values){
+    const li=e._zaiLine;
+    if(!li) continue;
+    if(zaiJrOnly && !li.co){ e.show=false; continue; }
+    e.show=true;
+    const s=zaiLineState(li);
+    const col=Cesium.Color.fromCssColorString(
+      s.st==='nostat' ? '#5f7fa6' : (SHINK_COLOR[s.st]||SHINK_COLOR.unknown));
+    const alpha=li.co?0.9:(s.st==='normal'||s.st==='nostat'?0.45:0.9);
+    e.polyline.material=col.withAlpha(alpha);
+    e.polyline.depthFailMaterial=col.withAlpha(alpha*0.45);
+    e.description=`<div style="font-size:13px"><b>${shinkEsc(li.n)}</b>（${shinkEsc(li.op)}）<br>`+
+      `状態: <b>${shinkEsc(s.text)}</b><br><span style="color:#889">`+
+      (li.co?'JR各社の公開運行情報より(目安)':'私鉄は遅延情報を取得できた場合のみ反映')+'</span></div>';
+    if(li._first&&counts[s.st]!==undefined) counts[s.st]++;
+  }
+  const upd=document.getElementById('upd');
+  const ts=zaiStatus&&zaiStatus.updated? zaiStatus.updated.slice(11,16) : '--:--';
+  const parts=[];
+  if(counts.suspend) parts.push(`見合わせ・運休 ${counts.suspend}`);
+  if(counts.delay) parts.push(`遅れ ${counts.delay}`);
+  if(counts.info) parts.push(`お知らせ ${counts.info}`);
+  upd.textContent=`在来線 運行状況 ${ts}時点 ─ ${parts.length?parts.join(' / ')+'路線':'JR全線平常運転'}`+
+    '（緑=平常 黄=お知らせ 橙=遅れ 赤=見合わせ・青灰=私鉄など情報対象外・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
+  try{ viewer.scene.requestRender(); }catch(_){}
+}
+async function loadZairaisen(){
+  try{
+    if(!zaiData) zaiData=await (await fetch('rail_lines.json')).json();
+    const src=new Cesium.CustomDataSource('zairaisen');
+    let nJr=0, nPvt=0;
+    for(const ln of zaiData.lines){
+      let first=true;
+      for(const seg of ln.coords){
+        if(seg.length<2) continue;
+        const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,1200); }
+        const e=src.entities.add({ name:`${ln.n}（${ln.op}）`,
+          polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
+            width:ln.co?2.4:1.3, material:Cesium.Color.GRAY,
+            clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
+        e._zaiLine={ n:ln.n, op:ln.op, co:ln.co, _first:first };
+        first=false;
+      }
+      if(ln.co) nJr++; else nPvt++;
+    }
+    zaiSrc=src; viewer.dataSources.add(src);
+    document.getElementById('cnt').textContent=`${nJr+nPvt} 路線`;
+    setErr(null);
+    zaiStatus=await fetchZaiStatus();
+    applyZaiStatus();
+    if(!zaiStatus) setErr('運行情報の取得に失敗(経路のみ表示)');
+  }catch(e){ setErr('在来線データの取得失敗: '+(e&&e.message||e)); }
+}
+function setZaiFilter(jrOnly){
+  zaiJrOnly=jrOnly;
+  document.querySelectorAll('#modebar button').forEach(b=>b.classList.toggle('on',(b.dataset.f==='jr')===jrOnly));
+  applyZaiStatus();
+}
+function setZairaisen(){
+  { const btn=document.getElementById('bZai');   // 2度押しでOFF
+    if(btn && btn.classList.contains('on')){ setLive(); return; } }
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto='esri'; refreshPhotoButtons();
+  const btn=document.getElementById('bZai'); if(btn)btn.classList.add('on');
+  setModeLbl('在来線'); clearStarlink(); setBasemap('dark');
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar');
+  if(mb){
+    mb.innerHTML='<button data-f="all" class="on" onclick="setZaiFilter(false)">JR＋私鉄</button>'+
+      '<button data-f="jr" onclick="setZaiFilter(true)">JRのみ</button>';
+    mb.style.display='flex';
+  }
+  zaiJrOnly=false;
+  setErr('在来線データを読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(136.5,32.2,2.45e6),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-78),roll:0}, duration:1.5 });
+  loadZairaisen();
+  if(zaiTimer)clearInterval(zaiTimer);
+  zaiTimer=setInterval(async()=>{ const s=await fetchZaiStatus(); if(s){ zaiStatus=s; applyZaiStatus(); } }, 5*60*1000);
+}
+
+// ===== 津波（気象庁bosai電文を直接取得・予報区の沿岸を色分け。独立オーバーレイ） =====
+const TSU_COLOR={ major:'#c800ff', warning:'#ff2800', advisory:'#f2e700', forecast:'#00aaff' };
+const TSU_LBL={ major:'大津波警報', warning:'津波警報', advisory:'津波注意報', forecast:'津波予報(若干の海面変動)' };
+function tsuKindLevel(kindName){
+  const n=kindName||'';
+  if(/解除|なし/.test(n)) return null;
+  if(/大津波警報/.test(n)) return 'major';
+  if(/津波警報/.test(n)) return 'warning';
+  if(/津波注意報/.test(n)) return 'advisory';
+  if(/津波予報/.test(n)) return 'forecast';
+  return null;
+}
+async function fetchTsunamiItems(){
+  // 最新の津波警報・注意報・予報電文(VTSE41)から予報区コード→レベルを作る
+  const list=await (await fetch('https://www.jma.go.jp/bosai/tsunami/data/list.json',{cache:'no-store'})).json();
+  const rep=(list||[]).find(e=>(e.json||'').includes('VTSE41'));
+  if(!rep) return { items:{}, time:null };
+  const d=await (await fetch('https://www.jma.go.jp/bosai/tsunami/data/'+rep.json,{cache:'no-store'})).json();
+  const items={};
+  const arr=(((d.Body||{}).Tsunami||{}).Forecast||{}).Item||[];
+  for(const it of arr){
+    const code=it.Area&&it.Area.Code;
+    const lv=tsuKindLevel(it.Category&&it.Category.Kind&&it.Category.Kind.Name);
+    if(code&&lv) items[code]=lv;
+  }
+  return { items, time:(d.Head&&d.Head.ReportDateTime)||rep.rdt||null };
+}
+function applyTsunami(items, time){
+  if(!tsuSrc||!tsuAreas) return;
+  tsuSrc.entities.removeAll();
+  let n=0;
+  const counts={};
+  for(const a of tsuAreas.areas){
+    const lv=items[a.c];
+    if(!lv) continue;
+    n++; counts[lv]=(counts[lv]||0)+1;
+    const col=Cesium.Color.fromCssColorString(TSU_COLOR[lv]);
+    for(const seg of a.coords){
+      const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,2000); }
+      tsuSrc.entities.add({ name:`${a.n}: ${TSU_LBL[lv]}`,
+        description:`<div style="font-size:13px"><b>${shinkEsc(a.n)}</b><br>`+
+          `<b style="color:${TSU_COLOR[lv]}">${TSU_LBL[lv]}</b><br>`+
+          `<span style="color:#889">${time?time.slice(0,16).replace('T',' ')+' 発表':''}・出典 気象庁</span></div>`,
+        polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:6,
+          material:col.withAlpha(0.95), depthFailMaterial:col.withAlpha(0.5),
+          clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
+    }
+  }
+  const lg=document.getElementById('tsuNote3');
+  if(lg){
+    lg.textContent = n
+      ? `${Object.entries(counts).map(([k,v])=>`${TSU_LBL[k]} ${v}予報区`).join('・')}（${time?time.slice(11,16)+'時点':''}）`
+      : '現在、津波警報・注意報等は発表されていません';
+  }
+  try{ viewer.scene.requestRender(); }catch(_){}
+  return n;
+}
+async function refreshTsunami(){
+  try{
+    const { items, time }=await fetchTsunamiItems();
+    applyTsunami(items, time);
+    return true;
+  }catch(e){
+    const lg=document.getElementById('tsuNote3');
+    if(lg) lg.textContent='津波情報の取得に失敗しました';
+    return false;
+  }
+}
+async function toggleTsunami(){
+  if(tsuBusy) return;
+  const btn=document.getElementById('bTsu');
+  const lg=document.getElementById('tsuLegend3');
+  if(!tsuOn){
+    tsuBusy=true;
+    btn.textContent='🌊 読み込み中…';
+    try{
+      if(!tsuAreas) tsuAreas=await (await fetch('tsunami_areas.json')).json();
+      if(!tsuSrc){ tsuSrc=new Cesium.CustomDataSource('tsunami'); viewer.dataSources.add(tsuSrc); }
+      tsuSrc.show=true;
+      await refreshTsunami();
+      tsuOn=true; btn.classList.add('tsu-on');
+      if(lg) lg.style.display='block';
+      if(!tsuTimer) tsuTimer=setInterval(()=>{ if(tsuOn) refreshTsunami(); }, 2*60*1000);
+      btn.textContent='🌊 津波';
+    }catch(e){
+      btn.textContent='🌊 取得失敗';
+      setTimeout(()=>{ if(!tsuOn) btn.textContent='🌊 津波'; },4000);
+    }
+    tsuBusy=false;
+  } else {
+    tsuOn=false;
+    if(tsuSrc) tsuSrc.show=false;
+    if(tsuTimer){ clearInterval(tsuTimer); tsuTimer=null; }
+    btn.classList.remove('tsu-on'); btn.textContent='🌊 津波';
+    if(lg) lg.style.display='none';
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }
 }
 
 // ===== 台風（現在=気象庁bosai予報JSON／過去=RSMC東京ベストトラック1951〜） =====
