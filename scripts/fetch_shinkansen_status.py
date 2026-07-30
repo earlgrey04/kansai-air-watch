@@ -77,6 +77,13 @@ def extract_sections(text, status=None):
     return out
 
 
+def strip_tags(html):
+    html = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html, flags=re.S)
+    html = re.sub(r'<!--.*?-->', '', html, flags=re.S)
+    text = re.sub(r'<[^>]+>', '\n', html)
+    return '\n'.join(l.strip() for l in text.split('\n') if l.strip())
+
+
 def jr_east():
     """東北・山形・秋田・上越・北陸(JR東区間)"""
     html = fetch('https://traininfo.jreast.co.jp/train_info/shinkansen.aspx').decode('utf-8', 'replace')
@@ -103,6 +110,19 @@ def jr_east():
             out[key]['detail'] = text
     if not out:
         raise ValueError('JR東: 路線ステータスをパースできず')
+    # 運休情報セクション(計画運休はここに掲載される)。「ありません」以外なら別枠へ
+    i = html.find('新幹線の運休情報')
+    if i >= 0:
+        block = strip_tags(html[i:i + 4000])
+        # セクション見出し以降、次の定型文までを抜く
+        m = re.search(r'新幹線の運休情報\n(.*?)(?:\n4時～翌2時|\nの間、|\n最新情報を|$)',
+                      block, re.S)
+        body = (m.group(1).strip() if m else '')
+        body = re.sub(r'^新幹線の運休情報\n?', '', body)
+        if body and '運休情報はありません' not in body:
+            out['_tomorrow'] = [{'name': 'JR東日本の新幹線 運休情報', 'line': '',
+                                 'status': 'suspend', 'text': body[:600],
+                                 'source': 'JR東日本'}]
     return out
 
 
@@ -133,10 +153,42 @@ def jr_central():
 
 
 def jr_west():
-    """山陽新幹線・北陸新幹線(JR西区間)"""
+    """山陽新幹線・北陸新幹線(JR西区間)。翌日以降の計画情報はdailyDataの日付枠から拾う"""
     d = json.loads(fetch('https://trafficinfo.westjr.co.jp/api/v1/trafficinfo.json'))
     today = datetime.now(JST).strftime('%Y-%m-%d')
     out = {}
+    tmr_items = []
+    for area_id, key, lname in ((4, 'sanyo', '山陽新幹線'), (5, 'hokuriku_west', '北陸新幹線')):
+        area = next((a for a in d.get('areaTrafficInfos', []) if a.get('id') == area_id), None)
+        if area is None:
+            continue
+        for dd in area.get('dailyData') or []:
+            date = dd.get('date') or ''
+            if not date or date <= today:
+                continue
+            conds, sec_strs = [], []
+            for pti in dd.get('placeTrafficInfos') or []:
+                for sti in pti.get('shinkansenTrafficInfos') or []:
+                    for det in sti.get('shinkansenTrafficInfoDetails') or []:
+                        cond = det.get('conditionName') or ''
+                        cause = det.get('cause') or ''
+                        conds.append((cond, cause))
+                        for sec in det.get('sections') or []:
+                            a, b = sec.get('startStation'), sec.get('endStation')
+                            if a and b:
+                                sec_strs.append(f'{a}〜{b}')
+            if conds:
+                worst = max((classify(c) for c, _ in conds), key=lambda s: SEVERITY[s])
+                txt = ' / '.join(dict.fromkeys(
+                    f'{c}({z})' if z else c for c, z in conds))
+                if sec_strs:
+                    txt += ' 区間: ' + '、'.join(dict.fromkeys(sec_strs))
+                md = date[5:].replace('-', '/')
+                tmr_items.append({'name': f'{lname}（{md}）', 'line': key,
+                                  'status': worst, 'text': txt[:300],
+                                  'source': 'JR西日本'})
+    if tmr_items:
+        out['_tomorrow'] = tmr_items
     for area_id, key in ((4, 'sanyo'), (5, 'hokuriku_west')):
         area = next((a for a in d.get('areaTrafficInfos', []) if a.get('id') == area_id), None)
         if area is None:
@@ -231,9 +283,20 @@ def jr_hokkaido():
     blob = gaikyo + ' ' + ' '.join(parts)
     st = 'suspend' if re.search(r'見合わせ|見合せ', gaikyo) else \
          ('delay' if chien or re.search(r'遅れ|遅延', gaikyo) else 'info')
-    return {'hokkaido': {'status': st, 'text': (' '.join(parts) or gaikyo.strip())[:120],
-                         'sections': extract_sections(gaikyo, st),
-                         'detail': (gaikyo.strip() + ('\n' + ' '.join(parts) if parts else ''))[:600]}}
+    out = {'hokkaido': {'status': st, 'text': (' '.join(parts) or gaikyo.strip())[:120],
+                        'sections': extract_sections(gaikyo, st),
+                        'detail': (gaikyo.strip() + ('\n' + ' '.join(parts) if parts else ''))[:600]}}
+    # 翌日ブロック(計画運休の予告はここに載る)
+    tm = d.get('tomorrow') or {}
+    tshin = tm.get('areaStatus', {}).get('shin', 0)
+    tunkyu = tm.get('unkyuTrains') or []
+    tgaikyo = ' '.join(g.get('honbun', '') for g in tm.get('gaikyo') or []).strip()
+    if tshin != 0 or tunkyu or (tgaikyo and '情報はありません' not in tgaikyo):
+        txt = tgaikyo or (f'運休予定 {len(tunkyu)}本' if tunkyu else '運行情報あり')
+        out['_tomorrow'] = [{'name': f'北海道新幹線（{tm.get("dateText", "翌日")}）',
+                             'line': 'hokkaido', 'status': classify(txt),
+                             'text': txt[:300], 'source': 'JR北海道'}]
+    return out
 
 
 def main():
@@ -246,9 +309,12 @@ def main():
     ]
     raw = {}
     errors = []
+    tomorrow_items = []
     for label, fn in sources:
         try:
-            for k, v in fn().items():
+            res = fn()
+            tomorrow_items.extend(res.pop('_tomorrow', []))
+            for k, v in res.items():
                 v['source'] = label
                 raw[k] = v
         except Exception as e:
@@ -308,7 +374,9 @@ def main():
         lines[k] = v
 
     out = {'updated': now.isoformat(timespec='seconds'),
-           'lines': lines, 'errors': errors}
+           'lines': lines,
+           'tomorrow': {'items': tomorrow_items},
+           'errors': errors}
     with open('shinkansen_status.json', 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
     print(json.dumps(out, ensure_ascii=False, indent=1))

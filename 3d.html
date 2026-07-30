@@ -71,7 +71,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v37-shinkansen-notice</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v38-shinkansen-planned</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -108,6 +108,7 @@
 </div>
 <div id="err"></div>
 <div id="shinkLegend">
+  <div id="shinkTmr" style="display:none;margin-bottom:6px;padding:6px 8px;background:rgba(88,60,160,.25);border:1px solid #5b4a9e;border-radius:8px;max-width:260px"></div>
   <span class="hd">運行状況の色</span><br>
   <span class="chip" style="background:#2ecc71"></span>平常運転<br>
   <span class="chip" style="background:#f1c40f"></span>お知らせ・運転変更<br>
@@ -1070,9 +1071,22 @@ function applyShinkStatus(st){
     }
     if(!mapped.length&&v.status!=='normal'&&v.status!=='unknown') parts.push(`${ents.name.replace('新幹線','')}: ${v.label}`);
   }
+  // 計画運休・翌日以降の情報(発表がある時だけ凡例内に表示)
+  const tmr=document.getElementById('shinkTmr');
+  if(tmr){
+    const items=(st&&st.tomorrow&&st.tomorrow.items)||[];
+    if(items.length){
+      tmr.style.display='block';
+      tmr.innerHTML='<b style="color:#c9b8ff">📅 計画運休・翌日以降</b><br>'+
+        items.map(it=>`<b>${shinkEsc(it.name||'')}</b><br>`+
+          `<span style="white-space:pre-line;display:inline-block;max-height:80px;overflow-y:auto">${shinkEsc(it.text||'')}</span>`).join('<br>');
+    } else { tmr.style.display='none'; tmr.innerHTML=''; }
+  }
   const upd=document.getElementById('upd');
   const ts=st&&st.updated ? st.updated.slice(11,16) : '--:--';
+  const tmrN=(st&&st.tomorrow&&st.tomorrow.items||[]).length;
   upd.textContent=`新幹線 運行状況 ${ts}時点 ─ ${parts.length?parts.join(' / '):'全線平常運転'}`+
+    (tmrN?`／📅計画運休情報あり(右下)`:'')+
     '・経路 国土数値情報N02-24／運行情報 JR各社(目安・凡例と公式リンクは右下)';
   try{ viewer.scene.requestRender(); }catch(_){}
 }
