@@ -72,6 +72,12 @@
   #basemapCtl button { background: none; border: none; color: var(--muted);
     font: inherit; font-size: 11.5px; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
   #basemapCtl button.on { background: #2b5f8f; color: #fff; }
+  #warnCtl { position: absolute; bottom: 22px; left: 178px; z-index: 1000;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 9px; padding: 4px; }
+  #warnCtl button { background: none; border: none; color: var(--muted);
+    font: inherit; font-size: 11.5px; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+  #warnCtl button.on { background: #7a3b10; color: #ffd9a8; }
+  #warnLegend { display: none; margin-top: 5px; border-top: 1px solid var(--border); padding-top: 4px; }
 
   #toggleBtn { display: none; }
   @media (max-width: 640px) {
@@ -126,6 +132,18 @@
   <span class="chip" style="background:#7f8c9b"></span>情報取得失敗<br>
   <span class="chip mini-chip"></span>破線＝ミニ新幹線<br>
   <span style="color:#8b98a9;font-size:10px">太線＝影響区間</span>
+  <div id="warnLegend">
+    <b style="font-size:10.5px;color:#8b98a9">警報・注意報(気象庁)</b><br>
+    <span class="chip" style="background:#0c000c;border:1px solid #666"></span>特別警報(レベル5)<br>
+    <span class="chip" style="background:#aa00ab"></span>危険警報(レベル4)<br>
+    <span class="chip" style="background:#ff2800"></span>警報(レベル3)<br>
+    <span class="chip" style="background:#f2e700"></span>注意報(レベル2)<br>
+    <span id="warnLegendNote" style="color:#8b98a9;font-size:10px"></span>
+  </div>
+</div>
+
+<div id="warnCtl">
+  <button id="warnBtn">⚠️ 警報・注意報</button>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -412,6 +430,135 @@ document.getElementById('toggleBtn').addEventListener('click', () => {
   const el = document.getElementById('lines');
   el.style.display = el.style.display === 'none' ? '' : 'none';
 });
+
+// ===== 警報・注意報レイヤー(気象庁) =====
+// ズームアウト時=官署(都道府県)単位の最大レベル、ズームイン時=市町村単位で色分け
+const WARN_COLOR = { 20: '#f2e700', 30: '#ff2800', 40: '#aa00ab', 50: '#0c000c' };
+const WARN_NAME = {
+  '33': '大雨特別警報', '43': '大雨危険警報', '03': '大雨警報', '10': '大雨注意報',
+  '39': '土砂災害特別警報', '49': '土砂災害危険警報', '09': '土砂災害警報', '29': '土砂災害注意報',
+  '38': '高潮特別警報', '48': '高潮危険警報', '08': '高潮警報', '19': '高潮注意報',
+  '35': '暴風特別警報', '05': '暴風警報', '15': '強風注意報',
+  '32': '暴風雪特別警報', '02': '暴風雪警報', '13': '風雪注意報',
+  '36': '大雪特別警報', '06': '大雪警報', '12': '大雪注意報',
+  '37': '波浪特別警報', '07': '波浪警報', '16': '波浪注意報',
+  '53': '洪水特別警報', '51': '洪水特別警報', '41': '洪水危険警報', '40': '洪水危険警報',
+  '31': '洪水警報', '30': '洪水警報', '04': '洪水警報', '18': '洪水注意報',
+  '14': '雷注意報', '17': '融雪注意報', '20': '濃霧注意報', '21': '乾燥注意報',
+  '22': 'なだれ注意報', '23': '低温注意報', '24': '霜注意報', '25': '着氷注意報', '26': '着雪注意報',
+};
+const WARN_DATA_URLS = [
+  { url: 'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/weather_warnings.json?ref=status',
+    opts: { headers: { 'Accept': 'application/vnd.github.raw+json' } } },
+  { url: 'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/weather_warnings.json', bust: true },
+  { url: 'weather_warnings.json' },
+];
+const WARN_MUNI_ZOOM = 8;   // このズーム以上で市町村単位表示
+let warnOn = false, warnAreas = null, warnData = null, warnGeo = null;
+let warnOfficeMax = {};
+map.createPane('warnPane').style.zIndex = 350;   // 路線(overlayPane=400)より下
+const warnRenderer = L.canvas({ pane: 'warnPane' });
+
+async function fetchWarnData() {
+  for (const src of WARN_DATA_URLS) {
+    try {
+      const url = src.bust ? `${src.url}?t=${Date.now()}` : src.url;
+      const r = await fetch(url, { cache: 'no-store', ...(src.opts || {}) });
+      if (!r.ok) continue;
+      return await r.json();
+    } catch (e) { /* 次へ */ }
+  }
+  return null;
+}
+
+function warnLevelOf(props) {
+  if (!warnData) return 0;
+  if (map.getZoom() >= WARN_MUNI_ZOOM) {
+    const m = warnData.munis[props.c];
+    return m ? m.lv : 0;
+  }
+  return warnOfficeMax[props.o] || 0;
+}
+
+function warnStyle(feat) {
+  const lv = warnLevelOf(feat.properties);
+  const muni = map.getZoom() >= WARN_MUNI_ZOOM;
+  return {
+    fillColor: WARN_COLOR[lv] || '#000', fillOpacity: lv ? 0.45 : 0,
+    color: muni ? '#556' : '#333', weight: muni ? 0.5 : 0.2, opacity: muni ? 0.6 : 0.12,
+  };
+}
+
+function warnTooltip(props) {
+  const muni = map.getZoom() >= WARN_MUNI_ZOOM;
+  if (muni) {
+    const m = warnData && warnData.munis[props.c];
+    const names = m ? m.k.map(k => WARN_NAME[k] || `コード${k}`).join('・') : '発表なし';
+    return `${props.n}: ${names}`;
+  }
+  const lv = warnOfficeMax[props.o] || 0;
+  const lbl = { 20: '注意報', 30: '警報', 40: '危険警報', 50: '特別警報' }[lv] || '発表なし';
+  return `管内最大: ${lbl}（ズームで市町村別）`;
+}
+
+function buildWarnLayer() {
+  if (warnGeo) { map.removeLayer(warnGeo); }
+  warnGeo = L.geoJSON(warnAreas, {
+    renderer: warnRenderer, pane: 'warnPane', style: warnStyle,
+    onEachFeature: (f, l) => l.bindTooltip(() => warnTooltip(f.properties),
+      { sticky: true, className: 'station-tip' }),
+  }).addTo(map);
+}
+
+function computeOfficeMax() {
+  warnOfficeMax = {};
+  if (!warnData || !warnAreas) return;
+  const officeOf = {};
+  for (const f of warnAreas.features) officeOf[f.properties.c] = f.properties.o;
+  for (const [c, m] of Object.entries(warnData.munis)) {
+    const o = officeOf[c];
+    if (o && m.lv > (warnOfficeMax[o] || 0)) warnOfficeMax[o] = m.lv;
+  }
+}
+
+async function refreshWarnData() {
+  const d = await fetchWarnData();
+  if (!d) return false;
+  warnData = d;
+  computeOfficeMax();
+  const t = d.reportDatetime ? d.reportDatetime.slice(11, 16) : '--:--';
+  document.getElementById('warnLegendNote').textContent =
+    `出典: 気象庁（${t}時点） ズームで都道府県⇔市町村切替`;
+  if (warnGeo) warnGeo.setStyle(warnStyle);
+  return true;
+}
+
+document.getElementById('warnBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('warnBtn');
+  warnOn = !warnOn;
+  btn.classList.toggle('on', warnOn);
+  const lg = document.getElementById('warnLegend');
+  if (warnOn) {
+    btn.textContent = '⚠️ 読み込み中…';
+    try {
+      if (!warnAreas) warnAreas = await (await fetch('warn_areas.json')).json();
+      const ok = await refreshWarnData();
+      if (!ok || !warnAreas) throw new Error('データ取得失敗');
+      buildWarnLayer();
+      lg.style.display = 'block';
+      btn.textContent = '⚠️ 警報・注意報';
+    } catch (e) {
+      warnOn = false; btn.classList.remove('on');
+      btn.textContent = '⚠️ 取得失敗';
+      setTimeout(() => { btn.textContent = '⚠️ 警報・注意報'; }, 4000);
+    }
+  } else {
+    if (warnGeo) { map.removeLayer(warnGeo); warnGeo = null; }
+    lg.style.display = 'none';
+  }
+});
+map.on('zoomend', () => { if (warnOn && warnGeo) warnGeo.setStyle(warnStyle); });
+setInterval(() => { if (warnOn) refreshWarnData(); }, 5 * 60 * 1000);
 </script>
 </body>
 </html>

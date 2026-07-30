@@ -21,14 +21,17 @@ jobs:
             -o shinkansen_status.json || true
       - name: fetch status
         run: python3 scripts/fetch_shinkansen_status.py
+      - name: fetch weather warnings
+        run: python3 scripts/fetch_weather_warnings.py || true
       - name: push to status branch
         run: |
           mkdir -p /tmp/out && cp shinkansen_status.json /tmp/out/
+          [ -s weather_warnings.json ] && cp weather_warnings.json /tmp/out/ || true
           cd /tmp/out
           git init -q -b status
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add shinkansen_status.json
+          git add -A
           git commit -q -m "update shinkansen status"
           git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" status
         env:
