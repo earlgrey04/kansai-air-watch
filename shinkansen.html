@@ -236,7 +236,7 @@ function renderPanel(data) {
       <div>
         <div class="line-name">${ll.name}<small>${ll.operator}</small></div>
         <div class="line-status st-${st.status}">${st.label}</div>
-        ${st.status !== 'normal' && st.text ? `<div class="line-detail">${escapeHtml(st.text)}</div>` : ''}
+        ${st.status !== 'normal' && st.text && st.text !== st.label ? `<div class="line-detail">${escapeHtml(st.text)}</div>` : ''}
       </div>`;
     row.addEventListener('click', () => {
       map.fitBounds(ll.bounds.pad(0.15));
