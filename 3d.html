@@ -81,7 +81,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v42-typhoon</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v43-typhoon-anim</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -340,6 +340,7 @@ function clearNewModes(){
   if(tyHistSrc){ try{ viewer.dataSources.remove(tyHistSrc,true); }catch(_){} tyHistSrc=null; }
   if(tyTimer){ try{ clearInterval(tyTimer); }catch(_){} tyTimer=null; }
   tyDecade=null;
+  try{ tyStopAnim(); }catch(_){}
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
   { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='none'; }
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
@@ -1282,26 +1283,61 @@ async function loadTyphoonCurrent(){
   }catch(e){ /* 台風なし・取得失敗はnames空のまま */ }
   return { src, names };
 }
+// 年代の台風を発生順に「描いていく」アニメーション
+var tyAnimTimer=null, tyAnimActive=[];
+const TY_START_EVERY=4;   // 何フレームごとに次の台風を開始するか
+const TY_PTS_PER_FRAME=2; // 1フレームで伸ばす点数
+function tyStopAnim(){
+  if(tyAnimTimer){ try{ clearInterval(tyAnimTimer); }catch(_){} tyAnimTimer=null; }
+  tyAnimActive=[];
+  const by=document.getElementById('eqBigYear'); if(by) by.style.display='none';
+}
+function tyMakeEntity(t, wmax){
+  const col=Cesium.Color.fromCssColorString(tyHistColor(wmax));
+  return tyHistSrc.entities.add({
+    name:`${t.y}年 台風${t.id.slice(2)}号 ${t.name||''}`,
+    description:`<div style="font-size:13px"><b>${t.y}年 台風${Number(t.id.slice(2))}号 ${t.name||''}</b><br>`+
+      `最大風速: ${wmax?wmax+'kt（約'+Math.round(wmax*0.514)+'m/s）':'記録なし'}<br>出典 気象庁RSMCベストトラック</div>`,
+    polyline:{ positions:[], width:wmax>=85?2.2:1.5,
+      material:col.withAlpha(0.65), depthFailMaterial:col.withAlpha(0.3), arcType:Cesium.ArcType.GEODESIC } });
+}
+function tyPositions(t, upto){
+  const pos=[];
+  for(let i=0;i<Math.min(upto,t.p.length);i++){ pos.push(t.p[i][1],t.p[i][0],2500); }
+  return Cesium.Cartesian3.fromDegreesArrayHeights(pos);
+}
 function drawTyHist(){
+  tyStopAnim();
   if(!tyHistSrc) return;
   tyHistSrc.entities.removeAll();
-  if(!tyDecade||!tyHistData) { try{ viewer.scene.requestRender(); }catch(_){ } return; }
-  let n=0;
-  for(const t of tyHistData.t){
-    if(Math.floor(t.y/10)*10!==tyDecade) continue;
-    const wmax=Math.max(...t.p.map(p=>p[3]||0));
-    const col=Cesium.Color.fromCssColorString(tyHistColor(wmax));
-    const pos=[]; for(const p of t.p){ pos.push(p[1],p[0],2500); }
-    tyHistSrc.entities.add({
-      name:`${t.y}年 台風${t.id.slice(2)}号 ${t.name||''}`,
-      description:`<div style="font-size:13px"><b>${t.y}年 台風${Number(t.id.slice(2))}号 ${t.name||''}</b><br>`+
-        `最大風速: ${wmax?wmax+'kt（約'+Math.round(wmax*0.514)+'m/s）':'記録なし'}<br>出典 気象庁RSMCベストトラック</div>`,
-      polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:wmax>=85?2.2:1.5,
-        material:col.withAlpha(0.65), depthFailMaterial:col.withAlpha(0.3), arcType:Cesium.ArcType.GEODESIC } });
-    n++;
-  }
-  document.getElementById('cnt').textContent=`${n} 個(${tyDecade}年代)`;
-  try{ viewer.scene.requestRender(); }catch(_){}
+  if(!tyDecade||!tyHistData){ try{ viewer.scene.requestRender(); }catch(_){ } return; }
+  const queue=tyHistData.t.filter(t=>Math.floor(t.y/10)*10===tyDecade);  // ファイルは発生順
+  const total=queue.length;
+  let qi=0, frame=0, done=0;
+  const by=document.getElementById('eqBigYear');
+  if(by){ by.style.display='block'; by.textContent=`${tyDecade}年`; }
+  tyAnimTimer=setInterval(()=>{
+    frame++;
+    if(frame%TY_START_EVERY===0 && qi<queue.length){
+      const t=queue[qi++];
+      const wmax=Math.max(...t.p.map(p=>p[3]||0));
+      tyAnimActive.push({ t, e:tyMakeEntity(t,wmax), upto:2 });
+      if(by) by.textContent=`${t.y}年`;
+      document.getElementById('cnt').textContent=`${qi} / ${total} 個(${tyDecade}年代)`;
+    }
+    for(let i=tyAnimActive.length-1;i>=0;i--){
+      const a=tyAnimActive[i];
+      a.upto+=TY_PTS_PER_FRAME;
+      a.e.polyline.positions=tyPositions(a.t,a.upto);
+      if(a.upto>=a.t.p.length){ tyAnimActive.splice(i,1); done++; }
+    }
+    if(qi>=queue.length && tyAnimActive.length===0){
+      tyStopAnim();
+      if(by){ by.style.display='block'; by.textContent=`${tyDecade}年代 全${total}個`; }
+      document.getElementById('cnt').textContent=`${total} 個(${tyDecade}年代)`;
+    }
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }, 33);
 }
 async function selectTyDecade(d){
   tyDecade = (tyDecade===d)? null : d;
