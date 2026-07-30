@@ -15,7 +15,15 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 
 JST = timezone(timedelta(hours=9))
-UA = 'Mozilla/5.0 (compatible; shinkansen-status-map; +https://earlgrey04.github.io/kansai-air-watch/)'
+UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36')
+HEADERS = {
+    'User-Agent': UA,
+    'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'ja,en-US;q=0.8,en;q=0.6',
+}
+# 取得失敗時に前回値を引き継ぐ最大時間
+INHERIT_MAX_AGE = timedelta(hours=3)
 
 SEVERITY = {'unknown': -1, 'normal': 0, 'info': 1, 'delay': 2, 'suspend': 3}
 LABELS = {'normal': '平常運転', 'info': 'お知らせあり', 'delay': '遅れあり',
@@ -23,7 +31,7 @@ LABELS = {'normal': '平常運転', 'info': 'お知らせあり', 'delay': '遅�
 
 
 def fetch(url, timeout=25):
-    req = urllib.request.Request(url, headers={'User-Agent': UA})
+    req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 
@@ -190,15 +198,41 @@ def main():
         raw['hokuriku'] = {'status': worst['status'], 'text': detail[:160],
                            'source': 'JR東日本・JR西日本'}
 
+    now = datetime.now(JST)
+
+    # 前回値(あれば)を読み、今回unknownの路線は一定時間まで引き継ぐ
+    prev_lines = {}
+    try:
+        with open('shinkansen_status.json', encoding='utf-8') as f:
+            prev_lines = json.load(f).get('lines', {})
+    except Exception:
+        pass
+
     all_keys = ['hokkaido', 'tohoku', 'yamagata', 'akita', 'joetsu',
                 'hokuriku', 'tokaido', 'sanyo', 'kyushu', 'nishikyushu']
     lines = {}
     for k in all_keys:
-        v = raw.get(k, {'status': 'unknown', 'text': LABELS['unknown'], 'source': ''})
+        v = raw.get(k)
+        if v:
+            v['asOf'] = now.isoformat(timespec='seconds')
+        else:
+            p = prev_lines.get(k)
+            ok = False
+            if p and p.get('status') not in (None, 'unknown') and p.get('asOf'):
+                try:
+                    age = now - datetime.fromisoformat(p['asOf'])
+                    ok = age <= INHERIT_MAX_AGE
+                except ValueError:
+                    ok = False
+            if ok:
+                v = dict(p)
+            else:
+                v = {'status': 'unknown', 'text': LABELS['unknown'],
+                     'source': '', 'asOf': now.isoformat(timespec='seconds')}
         v['label'] = LABELS[v['status']]
         lines[k] = v
 
-    out = {'updated': datetime.now(JST).isoformat(timespec='seconds'),
+    out = {'updated': now.isoformat(timespec='seconds'),
            'lines': lines, 'errors': errors}
     with open('shinkansen_status.json', 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, indent=1)

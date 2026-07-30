@@ -14,6 +14,11 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
+      - name: get previous status (for inheritance on transient failures)
+        run: |
+          curl -sf --max-time 20 \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/status/shinkansen_status.json" \
+            -o shinkansen_status.json || true
       - name: fetch status
         run: python3 scripts/fetch_shinkansen_status.py
       - name: push to status branch
