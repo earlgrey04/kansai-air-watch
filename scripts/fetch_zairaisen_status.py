@@ -42,7 +42,7 @@ def norm(name):
 
 
 def classify(text):
-    if re.search(r'見合わせ|見合せ|運行取り止め|運転取り止め|運行取りやめ|運転取りやめ', text or ''):
+    if re.search(r'見合わせ|見合せ|取り止め|取りやめ', text or ''):
         return 'suspend'
     if re.search(r'遅れ|遅延|運休', text or ''):
         return 'delay'
@@ -55,23 +55,68 @@ def fetch(url, timeout=25):
         return r.read()
 
 
-def put(lines, key, st, text):
+SEC_RE = re.compile(r'([一-龥ぁ-んァ-ヶーA-Za-z]{2,10})\s*[～〜~]\s*([一-龥ぁ-んァ-ヶーA-Za-z]{2,10})')
+
+
+def extract_sections(text, default_st=None):
+    """本文から「A～B(駅間)」を抽出。区間直後の文脈で個別に状態判定"""
+    out = []
+    seen = set()
+    for m in SEC_RE.finditer(text or ''):
+        a = re.split(r'駅', m.group(1))[-1] if '駅' in m.group(1) else m.group(1)
+        b = re.split(r'駅', m.group(2))[0]
+        b = re.sub(r'間$', '', b)
+        if (a, b) in seen:
+            continue
+        seen.add((a, b))
+        ctx = (text[m.end():].split('。', 1)[0])[:80]
+        if re.search(r'見合わせ|見合せ|取り止め|取りやめ|運休', ctx):
+            st = 'suspend'
+        elif re.search(r'遅れ|遅延|徐行', ctx):
+            st = 'delay'
+        else:
+            st = default_st or classify(text)
+        out.append({'f': a, 't': b, 'st': st})
+    return out
+
+
+def put(lines, key, st, text, sec=None):
     cur = lines.get(key)
-    if cur is None or SEVERITY[st] > SEVERITY[cur['st']]:
+    if cur is None:
         lines[key] = {'st': st, 'text': (text or '')[:200]}
+        if sec:
+            lines[key]['sec'] = sec
+        return
+    # 区間は常にマージ(同一路線の複数発表: 例 北上線の遅延行+見合わせ行)
+    if sec:
+        old = cur.get('sec') or []
+        seen = {(s['f'], s['t']) for s in old}
+        cur['sec'] = old + [s for s in sec if (s['f'], s['t']) not in seen]
+    if SEVERITY[st] > SEVERITY[cur['st']]:
+        cur['st'] = st
+        cur['text'] = (text or '')[:200]
+    # 路線の状態は区間の最悪値まで引き上げる(パネルの色と整合)
+    for sc in cur.get('sec') or []:
+        if SEVERITY.get(sc['st'], 0) > SEVERITY[cur['st']]:
+            cur['st'] = sc['st']
 
 
 def jr_east(lines):
     for page in ('kanto', 'tohoku', 'shinetsu'):
         html = fetch(f'https://traininfo.jreast.co.jp/train_info/{page}.aspx').decode('utf-8', 'replace')
-        items = re.findall(
-            r'traininfo-routes__name">([^<]+)</span>.*?traininfo-routes__status\s*([\w-]*)"?>\s*(?:<[^>]+>\s*)*<span>([^<]+)</span>',
-            html, re.S)
-        for name, cls, text in items:
-            text = text.strip()
+        for block in html.split('traininfo-routes__table__item')[1:]:
+            m = re.search(r'traininfo-routes__name">([^<]+)</span>', block)
+            s = re.search(r'traininfo-routes__status\s*([\w-]*)"?>\s*(?:<[^>]+>\s*)*<span>([^<]+)</span>', block)
+            if not m or not s:
+                continue
+            name, cls, text = m.group(1).strip(), s.group(1), s.group(2).strip()
             if '平常' in text or 'normal' in cls:
                 continue
-            put(lines, 'jre:' + norm(name), classify(text), f'{name}: {text}')
+            note = re.search(r'traininfo-routes__note">([^<]+)<', block)
+            note_t = note.group(1).strip() if note else ''
+            st = classify(f'{text} {note_t}')
+            put(lines, 'jre:' + norm(name), st,
+                f'{name}: {note_t or text}', extract_sections(note_t, st))
 
 
 def jr_west(lines):
@@ -85,13 +130,19 @@ def jr_west(lines):
                 for li in pti.get('conventionalLineTrafficInfos') or []:
                     ln = li.get('lineName') or ''
                     conds = []
+                    secs = []
                     for det in li.get('conventionalLineTrafficInfoDetails') or []:
                         c = det.get('conditionName') or ''
                         z = det.get('cause') or ''
                         conds.append(f'{c}({z})' if z else c)
+                        for sec in det.get('sections') or []:
+                            a, b = sec.get('startStation'), sec.get('endStation')
+                            if a and b:
+                                secs.append({'f': a, 't': b,
+                                             'st': classify(sec.get('conditionName') or c)})
                     if conds:
                         blob = ' / '.join(dict.fromkeys(conds))
-                        put(lines, 'jrw:' + norm(ln), classify(blob), f'{ln}: {blob}')
+                        put(lines, 'jrw:' + norm(ln), classify(blob), f'{ln}: {blob}', secs)
 
 
 def jr_central(lines):
@@ -100,7 +151,8 @@ def jr_central(lines):
         name = next((t.get('name') for t in mi.get('trainline') or [] if t.get('lang') == 'ja'), '')
         msg = next((t.get('message') for t in mi.get('delivery_msg') or [] if t.get('lang') == 'ja'), '')
         if name and name.endswith('線'):
-            put(lines, 'jrc:' + norm(name), classify(msg), f'{name}: {msg}')
+            st = classify(msg)
+            put(lines, 'jrc:' + norm(name), st, f'{name}: {msg}', extract_sections(msg, st))
 
 
 def jr_kyushu(lines):
@@ -115,8 +167,10 @@ def jr_kyushu(lines):
             if not ln or '新幹線' in ln:
                 continue
             txt = (e.findtext('txt') or '').strip()
-            put(lines, 'jrq:' + norm(ln), classify(txt),
-                f'{ln}: {txt.splitlines()[0][:80] if txt else "運行情報あり"}')
+            st = classify(txt)
+            put(lines, 'jrq:' + norm(ln), st,
+                f'{ln}: {txt.splitlines()[0][:80] if txt else "運行情報あり"}',
+                extract_sections(txt, st))
 
 
 JRH_SENKU_LINES = {

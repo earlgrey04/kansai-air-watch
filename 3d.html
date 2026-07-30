@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v46-pvt-visible</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v47-zai-sections</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -386,6 +386,7 @@ function clearNewModes(){
   try{ tyStopAnim(); }catch(_){}
   if(zaiSrc){ try{ viewer.dataSources.remove(zaiSrc,true); }catch(_){} zaiSrc=null; }
   if(zaiTimer){ try{ clearInterval(zaiTimer); }catch(_){} zaiTimer=null; }
+  zaiSecEnts=[];
   { const zp=document.getElementById('zaiPanel'); if(zp) zp.style.display='none'; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
   { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='none'; }
@@ -1278,6 +1279,35 @@ function renderZaiPanel(){
       `<div class="tx">${shinkEsc(v.text||'')}</div></div>`;
   }).join('');
 }
+var zaiStations=null, zaiStIdx=null, zaiSecEnts=[];
+function zaiBuildStIdx(){
+  zaiStIdx={};
+  if(!zaiStations) return;
+  for(const st of zaiStations.s){
+    const k=st.op+'|'+st.l;
+    (zaiStIdx[k]=zaiStIdx[k]||{})[st.n]=st.c;
+  }
+}
+function zaiFindSt(idx, name){
+  if(!idx||!name) return null;
+  if(idx[name]) return idx[name];
+  let best=null, bl=0;   // 発表文の切り出し余りに備えて接尾辞/接頭辞一致
+  for(const k in idx){
+    if(k.length>=2 && (name.endsWith(k)||k.startsWith(name)) && k.length>bl){ best=idx[k]; bl=k.length; }
+  }
+  return best;
+}
+function zaiSectionPath(ln, A, B){
+  const near=(piece,pt)=>{ let best=-1,bd=Infinity;
+    for(let i=0;i<piece.length;i++){ const dx=piece[i][0]-pt[0],dy=piece[i][1]-pt[1],d=dx*dx+dy*dy;
+      if(d<bd){bd=d;best=i;} }
+    return bd<0.005?best:-1; };  // ≒7km以内
+  for(const piece of ln.coords){
+    const ia=near(piece,A), ib=near(piece,B);
+    if(ia>=0&&ib>=0&&ia!==ib){ const [s,e]=ia<ib?[ia,ib]:[ib,ia]; return piece.slice(s,e+1); }
+  }
+  return null;
+}
 function zaiLineState(ln){
   const key=(ln.co?ln.co:'pvt')+':'+zaiNorm(ln.n);
   const ent=zaiStatus&&zaiStatus.lines&&zaiStatus.lines[key];
@@ -1288,6 +1318,37 @@ function zaiLineState(ln){
 }
 function applyZaiStatus(){
   if(!zaiSrc||!zaiData) return;
+  // 影響区間の切り出し(駅名を路線の駅リストと照合。他路線の区間はここで自動除外)
+  for(const e of zaiSecEnts){ try{ zaiSrc.entities.remove(e); }catch(_){} }
+  zaiSecEnts=[];
+  const mapped=new Set();
+  if(zaiStIdx && zaiStatus && zaiStatus.lines){
+    for(const ln of zaiData.lines){
+      if(!ln.co) continue;
+      const key=ln.co+':'+zaiNorm(ln.n);
+      const ent=zaiStatus.lines[key];
+      if(!ent||!ent.sec||!ent.sec.length) continue;
+      const idx=zaiStIdx[ln.op+'|'+ln.n];
+      if(!idx) continue;
+      for(const sec of ent.sec){
+        const A=zaiFindSt(idx,sec.f), B=zaiFindSt(idx,sec.t);
+        if(!A||!B) continue;
+        const path=zaiSectionPath(ln,A,B);
+        if(!path) continue;
+        mapped.add(ln.op+'|'+ln.n);
+        const col=Cesium.Color.fromCssColorString(SHINK_COLOR[sec.st]||SHINK_COLOR.info);
+        const pos=[]; for(const [lo,la] of path){ pos.push(lo,la,1400); }
+        const se=zaiSrc.entities.add({ name:`${ln.n} ${sec.f}〜${sec.t}`,
+          description:`<div style="font-size:13px"><b>${shinkEsc(ln.n)} ${shinkEsc(sec.f)}〜${shinkEsc(sec.t)}</b><br>`+
+            `状態: <b>${SHINK_LBL[sec.st]||sec.st}</b><br>${shinkEsc(ent.text||'')}<br>`+
+            `<span style="color:#889">JR各社の公開運行情報より(目安)</span></div>`,
+          polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:5,
+            material:col, depthFailMaterial:col.withAlpha(0.5),
+            clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
+        zaiSecEnts.push(se);
+      }
+    }
+  }
   const counts={ suspend:0, delay:0, info:0 };
   for(const e of zaiSrc.entities.values){
     const li=e._zaiLine;
@@ -1295,9 +1356,12 @@ function applyZaiStatus(){
     if(zaiJrOnly && !li.co){ e.show=false; continue; }
     e.show=true;
     const s=zaiLineState(li);
+    // 区間まで特定できた路線は本線を緑にして区間だけ色付け
+    const secMapped=mapped.has(li.op+'|'+li.n);
+    const dispSt=secMapped?'normal':s.st;
     const col=Cesium.Color.fromCssColorString(
-      s.st==='nostat' ? '#8fd0ff' : (SHINK_COLOR[s.st]||SHINK_COLOR.unknown));
-    const alpha=li.co?0.9:(s.st==='normal'?0.75:(s.st==='nostat'?0.85:0.9));
+      dispSt==='nostat' ? '#8fd0ff' : (SHINK_COLOR[dispSt]||SHINK_COLOR.unknown));
+    const alpha=li.co?0.9:(dispSt==='normal'?0.75:(dispSt==='nostat'?0.85:0.9));
     e.polyline.material=col.withAlpha(alpha);
     e.polyline.depthFailMaterial=col.withAlpha(alpha*0.45);
     e.description=`<div style="font-size:13px"><b>${shinkEsc(li.n)}</b>（${shinkEsc(li.op)}）<br>`+
@@ -1319,6 +1383,7 @@ function applyZaiStatus(){
 async function loadZairaisen(){
   try{
     if(!zaiData) zaiData=await (await fetch('rail_lines.json')).json();
+    if(!zaiStations){ try{ zaiStations=await (await fetch('rail_stations.json')).json(); zaiBuildStIdx(); }catch(_){} }
     const src=new Cesium.CustomDataSource('zairaisen');
     let nJr=0, nPvt=0;
     zaiKeyBounds={};
