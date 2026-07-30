@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v48-lightning-fix</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v49-rail-overlay</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -387,6 +387,7 @@ function clearNewModes(){
   if(zaiSrc){ try{ viewer.dataSources.remove(zaiSrc,true); }catch(_){} zaiSrc=null; }
   if(zaiTimer){ try{ clearInterval(zaiTimer); }catch(_){} zaiTimer=null; }
   zaiSecEnts=[];
+  if(zaiShinkSrc){ try{ viewer.dataSources.remove(zaiShinkSrc,true); }catch(_){} zaiShinkSrc=null; }
   { const zp=document.getElementById('zaiPanel'); if(zp) zp.style.display='none'; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
   { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='none'; }
@@ -1292,6 +1293,55 @@ function renderZaiPanel(){
   }).join('');
 }
 var zaiStations=null, zaiStIdx=null, zaiSecEnts=[];
+var zaiShinkSrc=null, zaiShinkOn=true;   // 在来線モードでの新幹線重ね書き
+async function zaiDrawShink(){
+  try{
+    if(!zaiShinkSrc){ zaiShinkSrc=new Cesium.CustomDataSource('zai-shink'); viewer.dataSources.add(zaiShinkSrc); }
+    zaiShinkSrc.entities.removeAll();
+    zaiShinkSrc.show=true;
+    if(!shinkLinesData) shinkLinesData=await (await fetch('shinkansen_lines.json')).json();
+    const st=await fetchShinkStatus();
+    for(const [key,ln] of Object.entries(shinkLinesData.lines)){
+      const v=(st&&st.lines&&st.lines[key])||{ status:'unknown', label:'情報なし', text:'' };
+      const mini=ln.type==='mini';
+      // 影響区間の切り出し(新幹線モードと同ロジック)
+      const mapped=[];
+      for(const sec of v.sections||[]){
+        const path=shinkSectionCoords(ln, ln.name, sec.from, sec.to);
+        if(path&&sec.status!=='normal') mapped.push({sec,path});
+      }
+      const baseSt=mapped.length?'normal':v.status;
+      const col=Cesium.Color.fromCssColorString(SHINK_COLOR[baseSt]||SHINK_COLOR.unknown);
+      const desc=`<div style="font-size:13px"><b>${shinkEsc(ln.name)}</b>（${shinkEsc(ln.operator)}）<br>`+
+        `状態: <b>${shinkEsc(v.label||'')}</b><br>${shinkEsc(v.text||'')}</div>`;
+      for(const seg of ln.coords){
+        const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,1600); }
+        const e=zaiShinkSrc.entities.add({ name:ln.name, description:desc,
+          polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:mini?3:4,
+            material:mini?new Cesium.PolylineDashMaterialProperty({ color:col, dashLength:14 }):col,
+            depthFailMaterial:col.withAlpha(0.4), clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
+      }
+      for(const {sec,path} of mapped){
+        const scol=Cesium.Color.fromCssColorString(SHINK_COLOR[sec.status]||SHINK_COLOR.info);
+        const pos=[]; for(const [lo,la] of path){ pos.push(lo,la,1800); }
+        zaiShinkSrc.entities.add({ name:`${ln.name} ${sec.from}〜${sec.to}`,
+          description:`<div style="font-size:13px"><b>${shinkEsc(ln.name)} ${shinkEsc(sec.from)}〜${shinkEsc(sec.to)}</b><br>`+
+            `状態: <b>${SHINK_LBL[sec.status]||sec.status}</b><br>${shinkEsc(v.text||'')}</div>`,
+          polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:6.5,
+            material:scol, depthFailMaterial:scol.withAlpha(0.5),
+            clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
+      }
+    }
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }catch(e){ /* 新幹線の重ね書きは失敗しても在来線表示は続行 */ }
+}
+function zaiToggleShink(){
+  zaiShinkOn=!zaiShinkOn;
+  const b=document.querySelector('#modebar button[data-f="shink"]');
+  if(b)b.classList.toggle('on', zaiShinkOn);
+  if(zaiShinkOn) zaiDrawShink();
+  else if(zaiShinkSrc){ zaiShinkSrc.show=false; try{ viewer.scene.requestRender(); }catch(_){} }
+}
 function zaiBuildStIdx(){
   zaiStIdx={};
   if(!zaiStations) return;
@@ -1425,6 +1475,7 @@ async function loadZairaisen(){
     setErr(null);
     zaiStatus=await fetchZaiStatus();
     applyZaiStatus();
+    if(zaiShinkOn) zaiDrawShink();
     if(!zaiStatus) setErr('運行情報の取得に失敗(経路のみ表示)');
   }catch(e){ setErr('在来線データの取得失敗: '+(e&&e.message||e)); }
 }
@@ -1447,7 +1498,8 @@ function setZairaisen(){
   const mb=document.getElementById('modebar');
   if(mb){
     mb.innerHTML='<button data-f="all" class="on" onclick="setZaiFilter(false)">JR＋私鉄</button>'+
-      '<button data-f="jr" onclick="setZaiFilter(true)">JRのみ</button>';
+      '<button data-f="jr" onclick="setZaiFilter(true)">JRのみ</button>'+
+      `<button data-f="shink" class="${zaiShinkOn?'on':''}" onclick="zaiToggleShink()">🚄新幹線</button>`;
     mb.style.display='flex';
   }
   zaiJrOnly=false;
@@ -1457,7 +1509,8 @@ function setZairaisen(){
     orientation:{heading:0,pitch:Cesium.Math.toRadians(-78),roll:0}, duration:1.5 });
   loadZairaisen();
   if(zaiTimer)clearInterval(zaiTimer);
-  zaiTimer=setInterval(async()=>{ const s=await fetchZaiStatus(); if(s){ zaiStatus=s; applyZaiStatus(); } }, 5*60*1000);
+  zaiTimer=setInterval(async()=>{ const s=await fetchZaiStatus(); if(s){ zaiStatus=s; applyZaiStatus(); }
+    if(zaiShinkOn) zaiDrawShink(); }, 5*60*1000);
 }
 
 // ===== 津波（気象庁bosai電文を直接取得・予報区の沿岸を色分け。独立オーバーレイ） =====
