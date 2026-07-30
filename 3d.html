@@ -24,12 +24,12 @@
   #bar button, #satbar button { font:13px sans-serif; padding:7px 11px; border:none; border-radius:8px; background:rgba(20,40,64,.85); color:#cfe0f5; }
   #bar button.on { background:#2563eb; color:#fff; font-weight:700; }
   #bar .brk { display:none; } /* 改行用: PCは無効、スマホのみ2段目の前で改行 */
-  #satbar { position:absolute; top:54px; right:10px; z-index:10; display:none; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  #satbar { position:absolute; top:100px; right:10px; z-index:10; display:none; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
   #satbar button.on { background:#0f9d6b; color:#fff; font-weight:700; }
   #satbar button { opacity:.65; }
   #satbar button.on { opacity:1; }
   /* 地震/火山 共通の期間バー（中身はモードで差し替え） */
-  #modebar { position:absolute; top:54px; right:10px; z-index:10; display:none; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  #modebar { position:absolute; top:100px; right:10px; z-index:10; display:none; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
   #modebar button { font:13px sans-serif; padding:7px 11px; border:none; border-radius:8px; background:rgba(20,40,64,.85); color:#cfe0f5; opacity:.72; }
   #modebar button.on { background:#e8562a; color:#fff; font-weight:700; opacity:1; }
   /* 雨雲タイムライン（実況→予測を再生）。左下のCesium再生ウィジェットとタイムラインを避けて配置 */
@@ -81,7 +81,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v41-shink-toggle</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v42-typhoon</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -98,6 +98,7 @@
   <button id="bSST" onclick="setSST()">🌡️ 水温</button>
   <button id="bFault" onclick="setFaults()">🗺️ 活断層</button>
   <button id="bShink" onclick="setShinkansen()">🚄 新幹線</button>
+  <button id="bTy" onclick="setTyphoon()">🌀 台風</button>
   <button id="bCable" onclick="setCables()">🔌 海底ケーブル</button>
   <button id="bWind" onclick="setWind()">🌬️ 上空の風</button>
   <button onclick="setSatellites()">🛰️ 衛星</button>
@@ -317,6 +318,7 @@ function setBasemap(mode){
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null, faultSrc=null;
 var shinkSrc=null, shinkStTimer=null, shinkLineEnts=null, shinkLinesData=null, shinkSectionEnts=[];
+var tySrc=null, tyHistSrc=null, tyTimer=null, tyHistData=null, tyDecade=null;
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
 var histEqPrim=null, histEqTimer=null, histEqRaf=null, histEqLastTs=0, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[], eqCoastSrc=null;
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
@@ -334,6 +336,10 @@ function clearNewModes(){
   if(faultSrc){ try{ viewer.dataSources.remove(faultSrc,true); }catch(_){} faultSrc=null; }
   if(shinkSrc){ try{ viewer.dataSources.remove(shinkSrc,true); }catch(_){} shinkSrc=null; }
   if(shinkStTimer){ try{ clearInterval(shinkStTimer); }catch(_){} shinkStTimer=null; }
+  if(tySrc){ try{ viewer.dataSources.remove(tySrc,true); }catch(_){} tySrc=null; }
+  if(tyHistSrc){ try{ viewer.dataSources.remove(tyHistSrc,true); }catch(_){} tyHistSrc=null; }
+  if(tyTimer){ try{ clearInterval(tyTimer); }catch(_){} tyTimer=null; }
+  tyDecade=null;
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
   { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='none'; }
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
@@ -1172,6 +1178,180 @@ function setShinkansen(){
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(136.5,32.2,2.45e6),
     orientation:{heading:0,pitch:Cesium.Math.toRadians(-78),roll:0}, duration:1.5 });
   loadShinkansen();
+}
+
+// ===== 台風（現在=気象庁bosai予報JSON／過去=RSMC東京ベストトラック1951〜） =====
+const TY_BASE='https://www.jma.go.jp/bosai/typhoon/';
+// 過去台風の色: 最大風速(kt)基準。0=記録なし(旧データ)
+function tyHistColor(wmax){
+  if(wmax>=105) return '#b26bff';
+  if(wmax>=85)  return '#ff3b30';
+  if(wmax>=64)  return '#ff8c00';
+  if(wmax>=48)  return '#ffd23f';
+  if(wmax>=34)  return '#4ea1ff';
+  return '#8899aa';
+}
+function tyCirclePts(lat,lon,rM){  // 円周ポリライン用の経度緯度列
+  const pts=[]; const rLat=rM/111320, rLon=rM/(111320*Math.cos(lat*Math.PI/180));
+  for(let a=0;a<=72;a++){ const t=a/72*2*Math.PI;
+    pts.push(lon+rLon*Math.sin(t), lat+rLat*Math.cos(t)); }
+  return pts;
+}
+async function loadTyphoonCurrent(){
+  const src=new Cesium.CustomDataSource('typhoon');
+  let names=[];
+  try{
+    const list=await (await fetch(TY_BASE+'data/targetTc.json',{cache:'no-store'})).json();
+    for(const tc of list){
+      const id=tc.tropicalCyclone;
+      let fc=null, spec=null;
+      try{ fc=await (await fetch(`${TY_BASE}data/${id}/forecast.json`,{cache:'no-store'})).json(); }catch(_){}
+      if(!fc) continue;
+      try{ spec=await (await fetch(`${TY_BASE}data/${id}/specifications.json`,{cache:'no-store'})).json(); }catch(_){}
+      const title=fc[0]||{};
+      const name=(title.name&&title.name.jp)||'';
+      const num=title.typhoonNumber||'';
+      const specBy={}; (spec||[]).forEach(e=>{ if(e&&e.advancedHours!==undefined) specBy[e.advancedHours]=e; });
+      const ana=fc.find(e=>e.advancedHours===0);
+      if(!ana) continue;
+      const s0=specBy[0]||{};
+      names.push(`台風${Number(num.slice(2))}号${name?('・'+name):''}（${s0.intensity||''}${(s0.pressure?` 中心${s0.pressure}hPa`:'')}）`);
+      // 経路実績
+      const tr=ana.track||{};
+      for(const [key,col,w] of [['preTyphoon','#8899aa',1.5],['typhoon','#ffffff',2.5]]){
+        const seg=tr[key]||[];
+        if(seg.length>1){
+          const pos=[]; for(const [la,lo] of seg){ pos.push(lo,la,4000); }
+          src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
+            width:w, material:Cesium.Color.fromCssColorString(col).withAlpha(0.9),
+            depthFailMaterial:Cesium.Color.fromCssColorString(col).withAlpha(0.5), arcType:Cesium.ArcType.GEODESIC } });
+        }
+      }
+      // 実況: 中心・強風域(黄)・暴風域(赤)
+      const c0=ana.center;
+      if(ana.galeWarningArea&&ana.galeWarningArea.radius){
+        src.entities.add({ position:Cesium.Cartesian3.fromDegrees(ana.galeWarningArea.center[1],ana.galeWarningArea.center[0],10),
+          ellipse:{ semiMajorAxis:ana.galeWarningArea.radius, semiMinorAxis:ana.galeWarningArea.radius,
+            material:Cesium.Color.fromCssColorString('#ffd23f').withAlpha(0.22), height:10 } });
+      }
+      const storm=ana.stormWarningArea&&ana.stormWarningArea.arc&&ana.stormWarningArea.arc[0];
+      if(storm&&storm[1]){
+        src.entities.add({ position:Cesium.Cartesian3.fromDegrees(storm[0][1],storm[0][0],20),
+          ellipse:{ semiMajorAxis:storm[1], semiMinorAxis:storm[1],
+            material:Cesium.Color.fromCssColorString('#ff3b30').withAlpha(0.3), height:20 } });
+      }
+      const desc0=`<div style="font-size:13px"><b>台風${Number(num.slice(2))}号 ${name}</b>（実況）<br>`+
+        `${s0.intensity||''} 中心気圧${s0.pressure||'-'}hPa／最大風速${(s0.maximumWind&&s0.maximumWind.sustained&&s0.maximumWind.sustained['m/s'])||'-'}m/s<br>`+
+        `${s0.course||''}へ ${(s0.speed&&s0.speed['km/h'])||'-'}km/h・出典 気象庁</div>`;
+      src.entities.add({ position:Cesium.Cartesian3.fromDegrees(c0[1],c0[0],4000),
+        name:`台風${Number(num.slice(2))}号 ${name}`, description:desc0,
+        point:{ pixelSize:9, color:Cesium.Color.WHITE, outlineColor:Cesium.Color.RED, outlineWidth:3 },
+        label:{ text:`台風${Number(num.slice(2))}号 ${name}`, font:'bold 13px sans-serif',
+          fillColor:Cesium.Color.WHITE, outlineColor:Cesium.Color.BLACK, outlineWidth:3,
+          style:Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset:new Cesium.Cartesian2(0,-18) } });
+      // 予報: 中心線＋予報円＋時刻ラベル
+      const fparts=fc.filter(e=>e.advancedHours>0&&e.center);
+      const linePos=[c0[1],c0[0],4000];
+      for(const f of fparts){ linePos.push(f.center[1],f.center[0],4000); }
+      if(fparts.length){
+        src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(linePos),
+          width:2, material:new Cesium.PolylineDashMaterialProperty({ color:Cesium.Color.WHITE.withAlpha(0.9), dashLength:12 }),
+          depthFailMaterial:new Cesium.PolylineDashMaterialProperty({ color:Cesium.Color.WHITE.withAlpha(0.4), dashLength:12 }), arcType:Cesium.ArcType.GEODESIC } });
+      }
+      for(const f of fparts){
+        const sp=specBy[f.advancedHours]||{};
+        const vt=f.validtime&&f.validtime.JST||'';
+        const short=vt? `${Number(vt.slice(5,7))}/${Number(vt.slice(8,10))} ${Number(vt.slice(11,13))}時`:'';
+        if(f.probabilityCircle&&f.probabilityCircle.radius){
+          const cir=tyCirclePts(f.center[0],f.center[1],f.probabilityCircle.radius);
+          const pos=[]; for(let i=0;i<cir.length;i+=2){ pos.push(cir[i],cir[i+1],3000); }
+          src.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
+            width:1.8, material:new Cesium.PolylineDashMaterialProperty({ color:Cesium.Color.WHITE.withAlpha(0.85), dashLength:10 }),
+            depthFailMaterial:new Cesium.PolylineDashMaterialProperty({ color:Cesium.Color.WHITE.withAlpha(0.35), dashLength:10 }), arcType:Cesium.ArcType.GEODESIC } });
+        }
+        src.entities.add({ position:Cesium.Cartesian3.fromDegrees(f.center[1],f.center[0],4000),
+          name:`台風${Number(num.slice(2))}号 ${short}(${f.advancedHours}時間後)`,
+          description:`<div style="font-size:13px"><b>${short}（${f.advancedHours}時間後）</b><br>`+
+            `${sp.intensity||''} 中心気圧${sp.pressure||'-'}hPa／最大風速${(sp.maximumWind&&sp.maximumWind.sustained&&sp.maximumWind.sustained['m/s'])||'-'}m/s<br>予報円の中心・出典 気象庁</div>`,
+          point:{ pixelSize:5, color:Cesium.Color.WHITE.withAlpha(0.95), outlineColor:Cesium.Color.BLACK, outlineWidth:1 },
+          label:{ text:short, font:'11px sans-serif', fillColor:Cesium.Color.WHITE,
+            outlineColor:Cesium.Color.BLACK, outlineWidth:2, style:Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset:new Cesium.Cartesian2(0,14) } });
+      }
+    }
+  }catch(e){ /* 台風なし・取得失敗はnames空のまま */ }
+  return { src, names };
+}
+function drawTyHist(){
+  if(!tyHistSrc) return;
+  tyHistSrc.entities.removeAll();
+  if(!tyDecade||!tyHistData) { try{ viewer.scene.requestRender(); }catch(_){ } return; }
+  let n=0;
+  for(const t of tyHistData.t){
+    if(Math.floor(t.y/10)*10!==tyDecade) continue;
+    const wmax=Math.max(...t.p.map(p=>p[3]||0));
+    const col=Cesium.Color.fromCssColorString(tyHistColor(wmax));
+    const pos=[]; for(const p of t.p){ pos.push(p[1],p[0],2500); }
+    tyHistSrc.entities.add({
+      name:`${t.y}年 台風${t.id.slice(2)}号 ${t.name||''}`,
+      description:`<div style="font-size:13px"><b>${t.y}年 台風${Number(t.id.slice(2))}号 ${t.name||''}</b><br>`+
+        `最大風速: ${wmax?wmax+'kt（約'+Math.round(wmax*0.514)+'m/s）':'記録なし'}<br>出典 気象庁RSMCベストトラック</div>`,
+      polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:wmax>=85?2.2:1.5,
+        material:col.withAlpha(0.65), depthFailMaterial:col.withAlpha(0.3), arcType:Cesium.ArcType.GEODESIC } });
+    n++;
+  }
+  document.getElementById('cnt').textContent=`${n} 個(${tyDecade}年代)`;
+  try{ viewer.scene.requestRender(); }catch(_){}
+}
+async function selectTyDecade(d){
+  tyDecade = (tyDecade===d)? null : d;
+  document.querySelectorAll('#modebar button').forEach(b=>b.classList.toggle('on', Number(b.dataset.d)===tyDecade));
+  if(tyDecade&&!tyHistData){
+    setErr('過去の台風経路を読み込み中…');
+    try{ tyHistData=await (await fetch('typhoons_hist.json')).json(); setErr(null); }
+    catch(e){ setErr('過去台風データの取得失敗'); tyDecade=null; return; }
+  }
+  if(!tyDecade){ const c=document.getElementById('cnt'); if(c)c.textContent='🌀'; }
+  drawTyHist();
+}
+async function loadTyphoon(){
+  const { src, names }=await loadTyphoonCurrent();
+  if(tySrc){ try{ viewer.dataSources.remove(tySrc,true); }catch(_){} }
+  tySrc=src; viewer.dataSources.add(src);
+  if(!tyHistSrc){ tyHistSrc=new Cesium.CustomDataSource('ty-hist'); viewer.dataSources.add(tyHistSrc); }
+  const upd=document.getElementById('upd');
+  upd.textContent=(names.length
+    ? `現在の台風: ${names.join(' / ')}。白実線=経路実績・白点線=予想進路(予報円つき)・赤=暴風域・黄=強風域。`
+    : '現在、発表中の台風情報はありません。')+
+    '下のボタンで過去の台風経路(1951〜)を年代別に重ねられます・出典 気象庁';
+  const c=document.getElementById('cnt'); if(c&&!tyDecade)c.textContent=names.length? names.length+' 個':'🌀';
+  setErr(null);
+  try{ viewer.scene.requestRender(); }catch(_){}
+}
+function setTyphoon(){
+  { const btn=document.getElementById('bTy');   // 2度押しでOFF(ライブへ)
+    if(btn && btn.classList.contains('on')){ setLive(); return; } }
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto='esri'; refreshPhotoButtons();
+  const btn=document.getElementById('bTy'); if(btn)btn.classList.add('on');
+  setModeLbl('台風'); clearStarlink(); setBasemap('dark'); // clearNewModesで前回分を掃除
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar');
+  if(mb){
+    mb.innerHTML='<span style="color:#9fb8d6;font:11px sans-serif;align-self:center">過去の経路:</span>'+
+      [1950,1960,1970,1980,1990,2000,2010,2020].map(d=>
+        `<button data-d="${d}" onclick="selectTyDecade(${d})">${d}s</button>`).join('');
+    mb.style.display='flex';
+  }
+  setErr('台風情報を読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(145,18,1.05e7),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-88),roll:0}, duration:1.5 });
+  loadTyphoon();
+  if(tyTimer)clearInterval(tyTimer);
+  tyTimer=setInterval(loadTyphoon, 10*60*1000);  // 現況・予報を10分毎に更新
 }
 
 // ===== 警報・注意報レイヤー(気象庁・新幹線モード内、2D shinkansen.htmlと同データ) =====
