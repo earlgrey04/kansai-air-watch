@@ -87,6 +87,7 @@ def jr_east():
         out[key] = {'status': st, 'text': text}
         if st != 'normal':
             out[key]['sections'] = extract_sections(text)
+            out[key]['detail'] = text
     if not out:
         raise ValueError('JR東: 路線ステータスをパースできず')
     return out
@@ -114,7 +115,8 @@ def jr_central():
     blob = ' '.join(texts) or '運転情報あり'
     st = classify(blob)
     return {'tokaido': {'status': st, 'text': blob[:120],
-                        'sections': extract_sections(blob, st)}}
+                        'sections': extract_sections(blob, st),
+                        'detail': blob[:600]}}
 
 
 def jr_west():
@@ -129,6 +131,7 @@ def jr_west():
             continue
         conds = []
         secs = []
+        details = []
         for dd in area.get('dailyData') or []:
             if dd.get('date') and dd['date'] != today:
                 continue
@@ -138,19 +141,36 @@ def jr_west():
                         cond = det.get('conditionName') or ''
                         cause = det.get('cause') or ''
                         conds.append((cond, cause))
+                        sec_strs = []
                         for sec in det.get('sections') or []:
                             a = sec.get('startStation')
                             b = sec.get('endStation')
                             if a and b:
                                 secs.append({'from': a, 'to': b,
                                              'status': classify(sec.get('conditionName') or cond)})
+                                ud = sec.get('upAndDown') or ''
+                                sec_strs.append(f'{a}〜{b}{"("+ud+")" if ud else ""}')
+                        # 発表タイトル(versionDetailの先頭)＋補足を詳細文に
+                        vtitle = ''
+                        for vd in det.get('versionDetail') or []:
+                            if vd.get('title'):
+                                vtitle = vd['title']
+                                break
+                        parts = [p for p in (
+                            f'【{cond}】' if cond else '',
+                            vtitle or (det.get('supplementary') or ''),
+                            f'原因: {cause}' if cause else '',
+                            f'区間: {"、".join(sec_strs)}' if sec_strs else '') if p]
+                        if parts:
+                            details.append(' '.join(parts))
         if not conds:
             out[key] = {'status': 'normal', 'text': '平常運転'}
         else:
             worst = max((classify(c) for c, _ in conds), key=lambda s: SEVERITY[s])
             txt = ' / '.join(dict.fromkeys(
                 f'{c}({z})' if z else c for c, z in conds))[:120]
-            out[key] = {'status': worst, 'text': txt, 'sections': secs}
+            out[key] = {'status': worst, 'text': txt, 'sections': secs,
+                        'detail': '\n'.join(dict.fromkeys(details))[:600]}
     return out
 
 
@@ -173,7 +193,8 @@ def jr_kyushu():
             st = classify(blob)
             out[key] = {'status': st,
                         'text': (txts[0].split('\n')[0] if txts else '運行情報あり')[:120],
-                        'sections': extract_sections(blob, st)}
+                        'sections': extract_sections(blob, st),
+                        'detail': '\n\n'.join(t.strip() for t in txts if t.strip())[:800]}
     for key in name2key.values():
         out.setdefault(key, {'status': 'unknown', 'text': LABELS['unknown']})
     return out
@@ -198,7 +219,8 @@ def jr_hokkaido():
     st = 'suspend' if re.search(r'見合わせ|見合せ', gaikyo) else \
          ('delay' if chien or re.search(r'遅れ|遅延', gaikyo) else 'info')
     return {'hokkaido': {'status': st, 'text': (' '.join(parts) or gaikyo.strip())[:120],
-                         'sections': extract_sections(gaikyo, st)}}
+                         'sections': extract_sections(gaikyo, st),
+                         'detail': (gaikyo.strip() + ('\n' + ' '.join(parts) if parts else ''))[:600]}}
 
 
 def main():
@@ -233,6 +255,10 @@ def main():
                            'source': 'JR東日本・JR西日本'}
         if secs:
             raw['hokuriku']['sections'] = secs
+        dets = [f"《{lbl}区間》{x['detail']}" for lbl, x in
+                (('JR東日本', east), ('JR西日本', west)) if x and x.get('detail')]
+        if dets:
+            raw['hokuriku']['detail'] = '\n'.join(dets)[:800]
 
     now = datetime.now(JST)
 

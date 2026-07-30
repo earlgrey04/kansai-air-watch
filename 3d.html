@@ -55,11 +55,23 @@
     #wxbar span { min-width:0; font-size:11px; }
     #wxbar button { padding:4px 9px; }
   }
+  /* 線クリックの詳細(infoBox)が上部メニューに被らないよう下げる */
+  .cesium-infoBox { top: 120px !important; right: 8px; max-width: 340px; }
+  @media (max-width: 700px) { .cesium-infoBox { top: 150px !important; max-width: 82vw; } }
+  /* 新幹線モードの凡例(公式リンク付き)。setShinkansenで表示 */
+  #shinkLegend { display:none; position:absolute; right:10px; bottom:44px; z-index:10;
+    background:rgba(10,30,50,.85); color:#dfeaff; border:1px solid #29496b; border-radius:10px;
+    padding:8px 12px; font:11px/1.75 system-ui,sans-serif; }
+  #shinkLegend .chip { display:inline-block; width:18px; height:5px; border-radius:3px;
+    margin-right:6px; vertical-align:middle; }
+  #shinkLegend a { color:#8fc1ee; text-decoration:none; }
+  #shinkLegend a:hover { text-decoration:underline; }
+  #shinkLegend .hd { font-size:10.5px; color:#9fb8d6; }
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v36-shinkansen-sections</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v37-shinkansen-notice</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -95,6 +107,22 @@
   <span id="wxTime">–</span>
 </div>
 <div id="err"></div>
+<div id="shinkLegend">
+  <span class="hd">運行状況の色</span><br>
+  <span class="chip" style="background:#2ecc71"></span>平常運転<br>
+  <span class="chip" style="background:#f1c40f"></span>お知らせ・運転変更<br>
+  <span class="chip" style="background:#f39c12"></span>遅れ<br>
+  <span class="chip" style="background:#e74c3c"></span>運転見合わせ<br>
+  <span class="chip" style="background:#7f8c9b"></span>情報取得失敗<br>
+  <span class="hd">破線＝ミニ新幹線／太線＝影響区間<br>線クリックで発表内容を表示</span><br>
+  <span class="hd">公式運行情報:</span><br>
+  <a href="https://www3.jrhokkaido.co.jp/webunkou/senku.html?id=24" target="_blank" rel="noopener">JR北海道</a> ／
+  <a href="https://traininfo.jreast.co.jp/train_info/shinkansen.aspx" target="_blank" rel="noopener">JR東日本</a> ／
+  <a href="https://traininfo.jr-central.co.jp/shinkansen/" target="_blank" rel="noopener">JR東海</a><br>
+  <a href="https://trafficinfo.westjr.co.jp/" target="_blank" rel="noopener">JR西日本</a> ／
+  <a href="https://www.jrkyushu.co.jp/trains/info/shin.html" target="_blank" rel="noopener">JR九州</a> ／
+  <a href="https://www.jrkyushu.co.jp/trains/info/nishi.html" target="_blank" rel="noopener">西九州</a>
+</div>
 <div id="eqBigYear" style="display:none;position:absolute;top:14%;left:50%;transform:translateX(-50%);font:bold 72px system-ui,sans-serif;color:rgba(255,255,255,0.92);text-shadow:0 2px 12px rgba(0,0,0,0.8);letter-spacing:2px;pointer-events:none;z-index:5"></div>
 <script>
 const SUPA = "https://iisatjsohjknjldpjslb.supabase.co";
@@ -287,6 +315,7 @@ function clearNewModes(){
   if(shinkSrc){ try{ viewer.dataSources.remove(shinkSrc,true); }catch(_){} shinkSrc=null; }
   if(shinkStTimer){ try{ clearInterval(shinkStTimer); }catch(_){} shinkStTimer=null; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
+  { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='none'; }
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
   if(landingSrc){ try{ viewer.dataSources.remove(landingSrc,true); }catch(_){} landingSrc=null; }
   if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
@@ -975,6 +1004,31 @@ function shinkSectionCoords(lineObj, lineName, from, to){
   return null;
 }
 const SHINK_LBL={ info:'お知らせ', delay:'遅れ', suspend:'運転見合わせ' };
+const SHINK_JRE='https://traininfo.jreast.co.jp/train_info/shinkansen.aspx';
+const SHINK_OFFICIAL={
+  hokkaido:[['JR北海道','https://www3.jrhokkaido.co.jp/webunkou/senku.html?id=24']],
+  tohoku:[['JR東日本',SHINK_JRE]], yamagata:[['JR東日本',SHINK_JRE]],
+  akita:[['JR東日本',SHINK_JRE]], joetsu:[['JR東日本',SHINK_JRE]],
+  hokuriku:[['JR東日本',SHINK_JRE],['JR西日本','https://trafficinfo.westjr.co.jp/']],
+  tokaido:[['JR東海','https://traininfo.jr-central.co.jp/shinkansen/']],
+  sanyo:[['JR西日本','https://trafficinfo.westjr.co.jp/']],
+  kyushu:[['JR九州','https://www.jrkyushu.co.jp/trains/info/shin.html']],
+  nishikyushu:[['JR九州','https://www.jrkyushu.co.jp/trains/info/nishi.html']],
+};
+const shinkEsc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function shinkLinksHtml(key){
+  return (SHINK_OFFICIAL[key]||[]).map(([n,u])=>
+    `<a href="${u}" target="_blank" rel="noopener" style="color:#8fc1ee">${n}の運行情報 ↗</a>`).join('　');
+}
+function shinkDescHtml(key, title, v){
+  const body=v.detail||v.text||'';
+  return `<div style="font-size:13px"><b>${shinkEsc(title)}</b><br>`+
+    `状態: <b>${shinkEsc(v.label||SHINK_LBL[v.status]||v.status||'')}</b><br>`+
+    `<div style="white-space:pre-line;max-height:180px;overflow-y:auto;margin:4px 0;`+
+    `border-left:2px solid #456;padding-left:7px">${shinkEsc(body)}</div>`+
+    `<span style="color:#889">情報源: ${shinkEsc(v.source||'')} ${v.asOf?'／'+v.asOf.slice(11,16)+'時点':''}</span><br>`+
+    `${shinkLinksHtml(key)}</div>`;
+}
 function applyShinkStatus(st){
   if(!shinkLineEnts||!shinkSrc) return;
   for(const e of shinkSectionEnts){ try{ shinkSrc.entities.remove(e); }catch(_){} }
@@ -996,8 +1050,8 @@ function applyShinkStatus(st){
       const pts=[]; for(const [lo,la] of path){ pts.push(lo,la,1700); }
       const scol=Cesium.Color.fromCssColorString(SHINK_COLOR[sec.status]||SHINK_COLOR.info);
       const e=shinkSrc.entities.add({ name:`${ents.name} ${sec.from}〜${sec.to}`,
-        description:`<div style="font-size:13px"><b>${ents.name} ${sec.from}〜${sec.to}</b><br>`+
-          `状態: <b>${SHINK_LBL[sec.status]||sec.status}</b><br>${(v.text||'').replace(/</g,'&lt;')}</div>`,
+        description:shinkDescHtml(key, `${ents.name} ${sec.from}〜${sec.to}`,
+          { ...v, label:SHINK_LBL[sec.status]||sec.status }),
         polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pts), width:6.5,
           material:scol, depthFailMaterial:scol.withAlpha(0.6),
           clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
@@ -1012,16 +1066,14 @@ function applyShinkStatus(st){
         e.polyline.material=col;
         e.polyline.depthFailMaterial=col.withAlpha(0.55);
       }
-      e.description=`<div style="font-size:13px"><b>${ents.name}</b>（${ents.operator}）<br>`+
-        `状態: <b>${v.label||''}</b><br>${(v.text||'').replace(/</g,'&lt;')}<br>`+
-        `<span style="color:#889">情報源: ${v.source||''} ／ ${v.asOf?v.asOf.slice(11,16)+'時点':''}</span></div>`;
+      e.description=shinkDescHtml(key, `${ents.name}（${ents.operator}）`, v);
     }
     if(!mapped.length&&v.status!=='normal'&&v.status!=='unknown') parts.push(`${ents.name.replace('新幹線','')}: ${v.label}`);
   }
   const upd=document.getElementById('upd');
   const ts=st&&st.updated ? st.updated.slice(11,16) : '--:--';
   upd.textContent=`新幹線 運行状況 ${ts}時点 ─ ${parts.length?parts.join(' / '):'全線平常運転'}`+
-    '（緑=平常 黄=お知らせ 橙=遅れ 赤=見合わせ・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
+    '・経路 国土数値情報N02-24／運行情報 JR各社(目安・凡例と公式リンクは右下)';
   try{ viewer.scene.requestRender(); }catch(_){}
 }
 async function loadShinkansen(){
@@ -1075,6 +1127,7 @@ function setShinkansen(){
   satPhoto='esri'; refreshPhotoButtons();               // 下地はEsri実写
   const btn=document.getElementById('bShink'); if(btn)btn.classList.add('on');
   setModeLbl('新幹線'); clearStarlink(); setBasemap('dark'); // clearNewModesで前回分を掃除
+  { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='block'; }
   viewer.clock.shouldAnimate=false;
   viewer.entities.removeAll(); plateVecEnts=[];
   const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';

@@ -40,6 +40,22 @@
   .line-status { font-size: 11.5px; margin-top: 1px; }
   .line-detail { font-size: 10.5px; color: var(--muted); margin-top: 1px;
     line-height: 1.35; word-break: break-all; }
+  .line-notice { font-size: 10.5px; color: #c9d6e5; margin-top: 3px; line-height: 1.45;
+    white-space: pre-line; max-height: 110px; overflow-y: auto; word-break: break-all;
+    background: rgba(255,255,255,.04); border-left: 2px solid var(--border);
+    padding: 4px 7px; border-radius: 0 6px 6px 0; }
+  .line-links { font-size: 10px; margin-top: 3px; }
+  .line-links a { color: #6ea8d8; text-decoration: none; margin-right: 9px; }
+  .line-links a:hover { text-decoration: underline; }
+
+  #legend { position: absolute; bottom: 70px; left: 10px; z-index: 1000;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
+    padding: 7px 11px; font-size: 11px; line-height: 1.8; }
+  #legend .chip { display: inline-block; width: 18px; height: 5px; border-radius: 3px;
+    margin-right: 6px; vertical-align: middle; }
+  #legend .mini-chip { background:
+    repeating-linear-gradient(90deg, #2ecc71 0 5px, transparent 5px 9px); }
+  @media (max-width: 640px) { #legend { display: none; } }
   #panel footer { padding: 7px 14px 9px; border-top: 1px solid var(--border);
     font-size: 9.5px; color: var(--muted); line-height: 1.5; }
   #panel footer a { color: #6ea8d8; text-decoration: none; }
@@ -81,6 +97,7 @@
   </header>
   <div id="lines"></div>
   <footer>
+    <span style="white-space:nowrap">🟢平常　🟡お知らせ　🟠遅れ　🔴見合わせ　⚪情報なし</span><br>
     経路: <a href="https://nlftp.mlit.go.jp/ksj/" target="_blank" rel="noopener">国土数値情報(N02-24)</a>を加工 ／
     運行情報: JR北海道・JR東日本・JR東海・JR西日本・JR九州の各公開情報(自動取得・目安) ／
     地図: Esri ｜ 公式の運行情報を必ずご確認ください
@@ -93,6 +110,17 @@
   <button data-b="sat">衛星</button>
 </div>
 
+<div id="legend">
+  <b style="font-size:10.5px;color:#8b98a9">運行状況の色</b><br>
+  <span class="chip" style="background:#2ecc71"></span>平常運転<br>
+  <span class="chip" style="background:#f1c40f"></span>お知らせ・運転変更<br>
+  <span class="chip" style="background:#f39c12"></span>遅れ<br>
+  <span class="chip" style="background:#e74c3c"></span>運転見合わせ<br>
+  <span class="chip" style="background:#7f8c9b"></span>情報取得失敗<br>
+  <span class="chip mini-chip"></span>破線＝ミニ新幹線<br>
+  <span style="color:#8b98a9;font-size:10px">太線＝影響区間</span>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
@@ -103,6 +131,24 @@ const STATUS_COLOR = { normal: '#2ecc71', info: '#f1c40f', delay: '#f39c12',
 // 北から順に表示
 const LINE_ORDER = ['hokkaido', 'tohoku', 'akita', 'yamagata', 'joetsu',
                     'hokuriku', 'tokaido', 'sanyo', 'kyushu', 'nishikyushu'];
+// 各社の公式運行情報ページ
+const JRE_URL = 'https://traininfo.jreast.co.jp/train_info/shinkansen.aspx';
+const OFFICIAL = {
+  hokkaido: [['JR北海道', 'https://www3.jrhokkaido.co.jp/webunkou/senku.html?id=24']],
+  tohoku: [['JR東日本', JRE_URL]],
+  yamagata: [['JR東日本', JRE_URL]],
+  akita: [['JR東日本', JRE_URL]],
+  joetsu: [['JR東日本', JRE_URL]],
+  hokuriku: [['JR東日本', JRE_URL], ['JR西日本', 'https://trafficinfo.westjr.co.jp/']],
+  tokaido: [['JR東海', 'https://traininfo.jr-central.co.jp/shinkansen/']],
+  sanyo: [['JR西日本', 'https://trafficinfo.westjr.co.jp/']],
+  kyushu: [['JR九州', 'https://www.jrkyushu.co.jp/trains/info/shin.html']],
+  nishikyushu: [['JR九州', 'https://www.jrkyushu.co.jp/trains/info/nishi.html']],
+};
+function officialLinks(key) {
+  return (OFFICIAL[key] || []).map(([n, u]) =>
+    `<a href="${u}" target="_blank" rel="noopener">${n}の運行情報 ↗</a>`).join('');
+}
 
 // statusブランチの最新JSONを取得。GitHub APIが最も鮮度が高い(rawは最大5分キャッシュ)
 const STATUS_SOURCES = [
@@ -224,9 +270,11 @@ function showPopup(key) {
   if (!ll) return;
   const stHtml = st
     ? `<div class="line-status st-${st.status}">●&nbsp;${st.label}</div>
-       <div class="line-detail">${escapeHtml(st.text || '')}</div>
-       <div class="line-detail">情報源: ${escapeHtml(st.source || '')}</div>`
-    : '';
+       ${st.detail ? `<div class="line-notice">${escapeHtml(st.detail)}</div>`
+                   : `<div class="line-detail">${escapeHtml(st.text || '')}</div>`}
+       <div class="line-detail">情報源: ${escapeHtml(st.source || '')}</div>
+       <div class="line-links">${officialLinks(key)}</div>`
+    : `<div class="line-links">${officialLinks(key)}</div>`;
   L.popup({ maxWidth: 260 })
     .setLatLng(ll.bounds.getCenter())
     .setContent(`<div class="line-name">${ll.name}<small>${ll.operator}</small></div>${stHtml}`)
@@ -285,17 +333,23 @@ function renderPanel(data) {
     if (!ll) continue;
     const row = document.createElement('div');
     row.className = 'line-row';
+    const notNormal = st.status !== 'normal';
     row.innerHTML = `
       <div class="dot" style="background:${STATUS_COLOR[st.status]};color:${STATUS_COLOR[st.status]}"></div>
-      <div>
+      <div style="min-width:0;flex:1">
         <div class="line-name">${ll.name}<small>${ll.operator}</small></div>
         <div class="line-status st-${st.status}">${st.label}</div>
-        ${st.status !== 'normal' && st.text && st.text !== st.label ? `<div class="line-detail">${escapeHtml(st.text)}</div>` : ''}
+        ${notNormal && st.text && st.text !== st.label ? `<div class="line-detail">${escapeHtml(st.text)}</div>` : ''}
+        ${notNormal && st.detail ? `<div class="line-notice">${escapeHtml(st.detail)}</div>` : ''}
+        <div class="line-links">${officialLinks(key)}</div>
       </div>`;
     row.addEventListener('click', () => {
       map.fitBounds(ll.bounds.pad(0.15));
       showPopup(key);
     });
+    // リンクや本文のスクロール操作でズームが誘発されないように
+    row.querySelectorAll('.line-links a, .line-notice').forEach(el =>
+      el.addEventListener('click', e => e.stopPropagation()));
     box.appendChild(row);
   }
   const up = document.getElementById('updated');
