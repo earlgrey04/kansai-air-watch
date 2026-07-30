@@ -1039,8 +1039,8 @@ function setShinkansen(){
   viewer.entities.removeAll(); plateVecEnts=[];
   const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
   setErr('新幹線データを読み込み中…');
-  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(137.5,36.5,2.1e6),
-    orientation:{heading:0,pitch:Cesium.Math.toRadians(-72),roll:0}, duration:1.5 });
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(136.5,32.2,2.45e6),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-78),roll:0}, duration:1.5 });
   loadShinkansen();
 }
 
