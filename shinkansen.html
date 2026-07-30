@@ -104,10 +104,12 @@ const STATUS_COLOR = { normal: '#2ecc71', info: '#f1c40f', delay: '#f39c12',
 const LINE_ORDER = ['hokkaido', 'tohoku', 'akita', 'yamagata', 'joetsu',
                     'hokuriku', 'tokaido', 'sanyo', 'kyushu', 'nishikyushu'];
 
-// GitHub Pages配信時はActionsが更新するstatusブランチの生JSONを優先
-const STATUS_URLS = [
-  'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/shinkansen_status.json',
-  'shinkansen_status.json',
+// statusブランチの最新JSONを取得。GitHub APIが最も鮮度が高い(rawは最大5分キャッシュ)
+const STATUS_SOURCES = [
+  { url: 'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/shinkansen_status.json?ref=status',
+    opts: { headers: { 'Accept': 'application/vnd.github.raw+json' } } },
+  { url: 'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/shinkansen_status.json', bust: true },
+  { url: 'shinkansen_status.json' },
 ];
 
 const JAPAN_BOUNDS = [[30.8, 129.0], [45.9, 146.0]];
@@ -253,9 +255,10 @@ function renderPanel(data) {
 }
 
 async function fetchStatus() {
-  for (const url of STATUS_URLS) {
+  for (const src of STATUS_SOURCES) {
     try {
-      const r = await fetch(url + (url.startsWith('http') ? `?t=${Date.now()}` : ''), { cache: 'no-store' });
+      const url = src.bust ? `${src.url}?t=${Date.now()}` : src.url;
+      const r = await fetch(url, { cache: 'no-store', ...(src.opts || {}) });
       if (!r.ok) continue;
       return await r.json();
     } catch (e) { /* 次の候補へ */ }
