@@ -100,7 +100,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v47-zai-sections</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v48-lightning-fix</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -819,10 +819,22 @@ function lightningOff(){
 async function loadLightning(){
   try{
     const idx=await (await fetch(`${JMA}/nowc/targetTimes_N1.json`,{cache:'no-store'})).json();
-    const f=idx[0]; // 最新実況
+    // 雷ナウキャスト(thns)は10分毎のみ生成＋公開に数分のラグがある。
+    // 索引(5分毎・雨雲用)から10分境界の新しい順に、タイルの実在を確認して採用する。
+    const cands=idx.filter(e=>Number(e.basetime.slice(10,12))%10===0).slice(0,3);
+    let f=null;
+    for(const c of cands){
+      try{
+        const r=await fetch(`${JMA}/nowc/${c.basetime}/none/${c.basetime}/surf/thns/5/28/12.png`,{cache:'no-store'});
+        if(r.ok){ f=c; break; }
+      }catch(_){}
+    }
+    if(!f){ setErr('雷データが見つかりません'); return; }
     const nl=viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-      url:`${JMA}/nowc/${f.basetime}/none/${f.validtime}/surf/thns/{z}/{x}/{y}.png`, maximumLevel:8, credit:"気象庁 雷ナウキャスト" }));
+      url:`${JMA}/nowc/${f.basetime}/none/${f.basetime}/surf/thns/{z}/{x}/{y}.png`, maximumLevel:8, credit:"気象庁 雷ナウキャスト" }));
     nl.alpha=0.9; const old=lightningLayer; lightningLayer=nl; if(old) viewer.imageryLayers.remove(old);
+    const upd=document.getElementById('upd');
+    if(upd&&lightningOn) upd.textContent=`雷ナウキャスト ${f.basetime.slice(8,10)}:${f.basetime.slice(10,12)}時点(10分毎更新)・活動度1〜4を色表示・出典 気象庁`;
     setErr(null);
   }catch(e){ setErr('雷データ取得失敗'); }
 }
