@@ -59,7 +59,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v34-esri-default</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v35-shinkansen</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -74,6 +74,7 @@
   <button id="bPlate" onclick="setPlates()">🗺️ プレート</button>
   <button id="bSST" onclick="setSST()">🌡️ 水温</button>
   <button id="bFault" onclick="setFaults()">🗺️ 活断層</button>
+  <button id="bShink" onclick="setShinkansen()">🚄 新幹線</button>
   <button id="bCable" onclick="setCables()">🔌 海底ケーブル</button>
   <button id="bWind" onclick="setWind()">🌬️ 上空の風</button>
   <button onclick="setSatellites()">🛰️ 衛星</button>
@@ -267,6 +268,7 @@ function setBasemap(mode){
 }
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null, faultSrc=null;
+var shinkSrc=null, shinkStTimer=null, shinkLineEnts=null;
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
 var histEqPrim=null, histEqTimer=null, histEqRaf=null, histEqLastTs=0, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[], eqCoastSrc=null;
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
@@ -282,6 +284,9 @@ function clearNewModes(){
   plateVecEnts=[];
   if(sstLayer){ try{ viewer.imageryLayers.remove(sstLayer); }catch(_){} sstLayer=null; }
   if(faultSrc){ try{ viewer.dataSources.remove(faultSrc,true); }catch(_){} faultSrc=null; }
+  if(shinkSrc){ try{ viewer.dataSources.remove(shinkSrc,true); }catch(_){} shinkSrc=null; }
+  if(shinkStTimer){ try{ clearInterval(shinkStTimer); }catch(_){} shinkStTimer=null; }
+  shinkLineEnts=null;
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
   if(landingSrc){ try{ viewer.dataSources.remove(landingSrc,true); }catch(_){} landingSrc=null; }
   if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
@@ -934,6 +939,109 @@ function setSST(){
   document.getElementById('upd').textContent=`海面水温（${sstDate()}）赤=暖かい → 青=冷たい。黒潮などの暖流が見える・NASA GHRSST MUR`;
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(140,25,2.4e7), duration:1.5 });
   setErr(null);
+}
+
+// ===== 新幹線（経路=国土数値情報N02-24／運行情報=JR5社をstatusブランチ経由で自動取得・色分け）=====
+const SHINK_COLOR={ normal:'#2ecc71', info:'#f1c40f', delay:'#f39c12', suspend:'#e74c3c', unknown:'#7f8c9b' };
+const SHINK_STATUS_SOURCES=[  // shinkansen.html と同じ優先順(API=鮮度高, raw=CORS可だが約5分キャッシュ, 同梱=最終手段)
+  { url:'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/shinkansen_status.json?ref=status',
+    opts:{ headers:{ 'Accept':'application/vnd.github.raw+json' } } },
+  { url:'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/shinkansen_status.json', bust:true },
+  { url:'shinkansen_status.json' },
+];
+async function fetchShinkStatus(){
+  for(const s of SHINK_STATUS_SOURCES){
+    try{
+      const u=s.bust ? s.url+'?t='+Date.now() : s.url;
+      const r=await fetch(u,{ cache:'no-store', ...(s.opts||{}) });
+      if(r.ok) return await r.json();
+    }catch(_){}
+  }
+  return null;
+}
+function applyShinkStatus(st){
+  if(!shinkLineEnts) return;
+  const parts=[];
+  for(const [key,ents] of Object.entries(shinkLineEnts)){
+    const v=(st&&st.lines&&st.lines[key])||{ status:'unknown', label:'情報なし', text:'' };
+    const col=Cesium.Color.fromCssColorString(SHINK_COLOR[v.status]||SHINK_COLOR.unknown);
+    for(const e of ents.stroke){
+      if(e.polyline.material instanceof Cesium.PolylineDashMaterialProperty){
+        e.polyline.material=new Cesium.PolylineDashMaterialProperty({ color:col, dashLength:14 });
+        e.polyline.depthFailMaterial=new Cesium.PolylineDashMaterialProperty({ color:col.withAlpha(0.55), dashLength:14 });
+      } else {
+        e.polyline.material=col;
+        e.polyline.depthFailMaterial=col.withAlpha(0.55);
+      }
+      e.description=`<div style="font-size:13px"><b>${ents.name}</b>（${ents.operator}）<br>`+
+        `状態: <b>${v.label||''}</b><br>${(v.text||'').replace(/</g,'&lt;')}<br>`+
+        `<span style="color:#889">情報源: ${v.source||''} ／ ${v.asOf?v.asOf.slice(11,16)+'時点':''}</span></div>`;
+    }
+    if(v.status!=='normal'&&v.status!=='unknown') parts.push(`${ents.name.replace('新幹線','')}: ${v.label}`);
+  }
+  const upd=document.getElementById('upd');
+  const ts=st&&st.updated ? st.updated.slice(11,16) : '--:--';
+  upd.textContent=`新幹線 運行状況 ${ts}時点 ─ ${parts.length?parts.join(' / '):'全線平常運転'}`+
+    '（緑=平常 黄=お知らせ 橙=遅れ 赤=見合わせ・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
+  try{ viewer.scene.requestRender(); }catch(_){}
+}
+async function loadShinkansen(){
+  try{
+    const j=await (await fetch('shinkansen_lines.json')).json();
+    const src=new Cesium.CustomDataSource('shinkansen');
+    const gray=Cesium.Color.fromCssColorString(SHINK_COLOR.unknown);
+    shinkLineEnts={};
+    for(const [key,ln] of Object.entries(j.lines)){
+      const ents={ name:ln.name, operator:ln.operator, stroke:[] };
+      const mini=ln.type==='mini';
+      for(const seg of ln.coords){
+        const pts=[]; for(const [lo,la] of seg){ pts.push(lo,la,1500); }
+        const pos=Cesium.Cartesian3.fromDegreesArrayHeights(pts);
+        // 黒縁(視認性用の下敷き)
+        src.entities.add({ polyline:{ positions:pos, width:mini?5:7,
+          material:Cesium.Color.BLACK.withAlpha(0.5), clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
+        const e=src.entities.add({ name:ln.name, polyline:{ positions:pos, width:mini?2.5:3.5,
+          material:mini?new Cesium.PolylineDashMaterialProperty({ color:gray, dashLength:14 }):gray,
+          depthFailMaterial:mini?new Cesium.PolylineDashMaterialProperty({ color:gray.withAlpha(0.55), dashLength:14 }):gray.withAlpha(0.55),
+          clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
+        ents.stroke.push(e);
+      }
+      shinkLineEnts[key]=ents;
+    }
+    for(const s of j.stations){
+      src.entities.add({ position:Cesium.Cartesian3.fromDegrees(s.c[0],s.c[1],1500),
+        name:`${s.n}駅（${s.l}）`,
+        point:{ pixelSize:4, color:Cesium.Color.fromCssColorString('#cfe5ff'),
+          outlineColor:Cesium.Color.BLACK, outlineWidth:1,
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, 1.2e6) },
+        label:{ text:s.n, font:'11px sans-serif', fillColor:Cesium.Color.WHITE,
+          outlineColor:Cesium.Color.BLACK, outlineWidth:2, style:Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset:new Cesium.Cartesian2(0,-12),
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, 3.0e5) } });
+    }
+    shinkSrc=src; viewer.dataSources.add(src);
+    document.getElementById('cnt').textContent=Object.keys(j.lines).length+' 路線';
+    setErr(null);
+    const st=await fetchShinkStatus();
+    applyShinkStatus(st);
+    if(!st) setErr('運行情報の取得に失敗（経路のみ表示）');
+    shinkStTimer=setInterval(async()=>{ const s=await fetchShinkStatus(); if(s) applyShinkStatus(s); }, 5*60*1000);
+  }catch(e){ setErr('新幹線データの取得失敗: '+(e&&e.message||e)); }
+}
+function setShinkansen(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto='esri'; refreshPhotoButtons();               // 下地はEsri実写
+  const btn=document.getElementById('bShink'); if(btn)btn.classList.add('on');
+  setModeLbl('新幹線'); clearStarlink(); setBasemap('dark'); // clearNewModesで前回分を掃除
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar'); if(mb)mb.style.display='none';
+  setErr('新幹線データを読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(137.5,36.5,2.1e6),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-72),roll:0}, duration:1.5 });
+  loadShinkansen();
 }
 
 // ===== 海底ケーブル（TeleGeography・color=ケーブル別／陸揚局＝黄点）=====
