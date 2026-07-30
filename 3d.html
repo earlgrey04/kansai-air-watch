@@ -59,7 +59,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v35-shinkansen</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v36-shinkansen-sections</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -268,7 +268,7 @@ function setBasemap(mode){
 }
 // ===== プレート/海面水温モードの共有状態と後始末（全モード遷移で呼ばれる）=====
 var plateBoundarySrc=null, plateVecEnts=[], sstLayer=null, cableSrc=null, landingSrc=null, faultSrc=null;
-var shinkSrc=null, shinkStTimer=null, shinkLineEnts=null;
+var shinkSrc=null, shinkStTimer=null, shinkLineEnts=null, shinkLinesData=null, shinkSectionEnts=[];
 var windPrim=null, windTickRemove=null, windParticles=null, windGrid=null, windGridAll=null;
 var histEqPrim=null, histEqTimer=null, histEqRaf=null, histEqLastTs=0, histEqPts=null, histEqColors=null, histEqSizes=null, histEqData=null, histEqIdx=0, histEqT=0, histEqT0=0, histEqT1=0, histEqPlaying=false, histEqFlash=[], eqCoastSrc=null;
 var windLevel='250hPa', windVmax=70; // 表示中の高度と、その高度の風速スケール（色/太さ/流速の基準）
@@ -286,7 +286,7 @@ function clearNewModes(){
   if(faultSrc){ try{ viewer.dataSources.remove(faultSrc,true); }catch(_){} faultSrc=null; }
   if(shinkSrc){ try{ viewer.dataSources.remove(shinkSrc,true); }catch(_){} shinkSrc=null; }
   if(shinkStTimer){ try{ clearInterval(shinkStTimer); }catch(_){} shinkStTimer=null; }
-  shinkLineEnts=null;
+  shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
   if(landingSrc){ try{ viewer.dataSources.remove(landingSrc,true); }catch(_){} landingSrc=null; }
   if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
@@ -959,12 +959,51 @@ async function fetchShinkStatus(){
   }
   return null;
 }
+// 路線上の駅from〜駅to間の座標列を切り出す(shinkansen.htmlと同ロジック)
+function shinkSectionCoords(lineObj, lineName, from, to){
+  const find=n=>{ const s=shinkLinesData.stations.find(s=>s.l===lineName&&s.n===n); return s&&s.c; };
+  const A=find(from), B=find(to);
+  if(!A||!B) return null;
+  const near=(piece,pt)=>{ let best=-1,bd=Infinity;
+    for(let i=0;i<piece.length;i++){ const dx=piece[i][0]-pt[0],dy=piece[i][1]-pt[1],d=dx*dx+dy*dy;
+      if(d<bd){bd=d;best=i;} }
+    return bd<0.0036?best:-1; };
+  for(const piece of lineObj.coords){
+    const ia=near(piece,A), ib=near(piece,B);
+    if(ia>=0&&ib>=0&&ia!==ib){ const [s,e]=ia<ib?[ia,ib]:[ib,ia]; return piece.slice(s,e+1); }
+  }
+  return null;
+}
+const SHINK_LBL={ info:'お知らせ', delay:'遅れ', suspend:'運転見合わせ' };
 function applyShinkStatus(st){
-  if(!shinkLineEnts) return;
+  if(!shinkLineEnts||!shinkSrc) return;
+  for(const e of shinkSectionEnts){ try{ shinkSrc.entities.remove(e); }catch(_){} }
+  shinkSectionEnts=[];
   const parts=[];
   for(const [key,ents] of Object.entries(shinkLineEnts)){
     const v=(st&&st.lines&&st.lines[key])||{ status:'unknown', label:'情報なし', text:'' };
-    const col=Cesium.Color.fromCssColorString(SHINK_COLOR[v.status]||SHINK_COLOR.unknown);
+    // 影響区間が経路上に特定できたら本線は緑、区間だけ太線で色付け
+    const mapped=[];
+    if(shinkLinesData){
+      for(const sec of v.sections||[]){
+        const path=shinkSectionCoords(ents.raw, ents.name, sec.from, sec.to);
+        if(path&&sec.status!=='normal') mapped.push({sec,path});
+      }
+    }
+    const col=Cesium.Color.fromCssColorString(
+      mapped.length?SHINK_COLOR.normal:(SHINK_COLOR[v.status]||SHINK_COLOR.unknown));
+    for(const {sec,path} of mapped){
+      const pts=[]; for(const [lo,la] of path){ pts.push(lo,la,1700); }
+      const scol=Cesium.Color.fromCssColorString(SHINK_COLOR[sec.status]||SHINK_COLOR.info);
+      const e=shinkSrc.entities.add({ name:`${ents.name} ${sec.from}〜${sec.to}`,
+        description:`<div style="font-size:13px"><b>${ents.name} ${sec.from}〜${sec.to}</b><br>`+
+          `状態: <b>${SHINK_LBL[sec.status]||sec.status}</b><br>${(v.text||'').replace(/</g,'&lt;')}</div>`,
+        polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pts), width:6.5,
+          material:scol, depthFailMaterial:scol.withAlpha(0.6),
+          clampToGround:false, arcType:Cesium.ArcType.GEODESIC } });
+      shinkSectionEnts.push(e);
+      parts.push(`${ents.name.replace('新幹線','')} ${sec.from}〜${sec.to}: ${SHINK_LBL[sec.status]||sec.status}`);
+    }
     for(const e of ents.stroke){
       if(e.polyline.material instanceof Cesium.PolylineDashMaterialProperty){
         e.polyline.material=new Cesium.PolylineDashMaterialProperty({ color:col, dashLength:14 });
@@ -977,7 +1016,7 @@ function applyShinkStatus(st){
         `状態: <b>${v.label||''}</b><br>${(v.text||'').replace(/</g,'&lt;')}<br>`+
         `<span style="color:#889">情報源: ${v.source||''} ／ ${v.asOf?v.asOf.slice(11,16)+'時点':''}</span></div>`;
     }
-    if(v.status!=='normal'&&v.status!=='unknown') parts.push(`${ents.name.replace('新幹線','')}: ${v.label}`);
+    if(!mapped.length&&v.status!=='normal'&&v.status!=='unknown') parts.push(`${ents.name.replace('新幹線','')}: ${v.label}`);
   }
   const upd=document.getElementById('upd');
   const ts=st&&st.updated ? st.updated.slice(11,16) : '--:--';
@@ -988,11 +1027,12 @@ function applyShinkStatus(st){
 async function loadShinkansen(){
   try{
     const j=await (await fetch('shinkansen_lines.json')).json();
+    shinkLinesData=j;
     const src=new Cesium.CustomDataSource('shinkansen');
     const gray=Cesium.Color.fromCssColorString(SHINK_COLOR.unknown);
     shinkLineEnts={};
     for(const [key,ln] of Object.entries(j.lines)){
-      const ents={ name:ln.name, operator:ln.operator, stroke:[] };
+      const ents={ name:ln.name, operator:ln.operator, stroke:[], raw:ln };
       const mini=ln.type==='mini';
       for(const seg of ln.coords){
         const pts=[]; for(const [lo,la] of seg){ pts.push(lo,la,1500); }

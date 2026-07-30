@@ -149,11 +149,38 @@ document.querySelectorAll('#basemapCtl button').forEach(btn => {
   });
 });
 
-const lineLayers = {};   // key -> {casing:[], stroke:[], bounds}
+const lineLayers = {};   // key -> {casing:[], stroke:[], bounds, raw}
 const stationLayer = L.layerGroup();
+const sectionLayer = L.layerGroup();   // 影響区間のオーバーレイ
 let linesData = null;
 
 function toLatLng(coords) { return coords.map(c => [c[1], c[0]]); }
+
+// 路線上の駅from〜駅to間の座標列を切り出す(駅名が路線の駅リストに無い/遠い場合はnull)
+function sectionCoords(lineObj, lineName, from, to) {
+  const find = n => {
+    const s = linesData.stations.find(s => s.l === lineName && s.n === n);
+    return s && s.c;
+  };
+  const A = find(from), B = find(to);
+  if (!A || !B) return null;
+  const near = (piece, pt) => {
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < piece.length; i++) {
+      const dx = piece[i][0] - pt[0], dy = piece[i][1] - pt[1], d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return bd < 0.0036 ? best : -1;  // 約0.06°(≒6km)以内のみ有効
+  };
+  for (const piece of lineObj.coords) {
+    const ia = near(piece, A), ib = near(piece, B);
+    if (ia >= 0 && ib >= 0 && ia !== ib) {
+      const [s, e] = ia < ib ? [ia, ib] : [ib, ia];
+      return piece.slice(s, e + 1);
+    }
+  }
+  return null;
+}
 
 function drawLines(data) {
   linesData = data;
@@ -173,8 +200,9 @@ function drawLines(data) {
       stroke.push(s);
       bounds = bounds ? bounds.extend(s.getBounds()) : s.getBounds();
     }
-    lineLayers[key] = { casing, stroke, bounds, name: ln.name, operator: ln.operator };
+    lineLayers[key] = { casing, stroke, bounds, name: ln.name, operator: ln.operator, raw: ln };
   }
+  sectionLayer.addTo(map);
   for (const st of data.stations) {
     const m = L.circleMarker([st.c[1], st.c[0]], { radius: 3, color: '#fff',
       weight: 1, fillColor: '#9fc9ff', fillOpacity: .9 });
@@ -212,17 +240,41 @@ function escapeHtml(s) {
 
 function applyStatus(data) {
   statusData = data;
+  sectionLayer.clearLayers();
   for (const [key, ll] of Object.entries(lineLayers)) {
     const st = data.lines[key] || { status: 'unknown' };
-    const color = STATUS_COLOR[st.status] || STATUS_COLOR.unknown;
+    // 影響区間が経路上に特定できた場合: 本線は緑にして区間だけ色を付ける
+    const mapped = [];
+    for (const sec of st.sections || []) {
+      const path = sectionCoords(ll.raw, ll.name, sec.from, sec.to);
+      if (path && sec.status !== 'normal') mapped.push({ sec, path });
+    }
+    const baseColor = mapped.length ? STATUS_COLOR.normal
+                                    : (STATUS_COLOR[st.status] || STATUS_COLOR.unknown);
     for (const s of ll.stroke) {
-      s.setStyle({ color });
+      s.setStyle({ color: baseColor });
       const el = s.getElement();
-      if (el) el.classList.toggle('blink', st.status === 'suspend');
+      if (el) el.classList.toggle('blink', !mapped.length && st.status === 'suspend');
+    }
+    for (const { sec, path } of mapped) {
+      const ll2 = toLatLng(path);
+      sectionLayer.addLayer(L.polyline(ll2, { color: '#000', opacity: .6,
+        weight: 9, interactive: false }));
+      const p = L.polyline(ll2, { color: STATUS_COLOR[sec.status] || STATUS_COLOR.info,
+        weight: 5.5, opacity: 1 });
+      p.bindTooltip(`${ll.name} ${sec.from}〜${sec.to}: ${LABELS_JA[sec.status] || sec.status}`,
+        { sticky: true, className: 'station-tip' });
+      p.on('click', () => showPopup(key));
+      sectionLayer.addLayer(p);
+      if (sec.status === 'suspend') {
+        const el = p.getElement();
+        if (el) el.classList.add('blink');
+      }
     }
   }
   renderPanel(data);
 }
+const LABELS_JA = { info: 'お知らせ', delay: '遅れ', suspend: '運転見合わせ' };
 
 function renderPanel(data) {
   const box = document.getElementById('lines');

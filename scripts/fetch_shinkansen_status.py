@@ -45,6 +45,25 @@ def classify(text):
     return 'info'
 
 
+SEC_RE = re.compile(r'([一-龥ぁ-んァ-ヶーA-Za-z]{2,10})\s*[～〜~]\s*([一-龥ぁ-んァ-ヶーA-Za-z]{2,10})')
+
+
+def extract_sections(text, status=None):
+    """本文から「A～B」区間を抽出(駅名の妥当性はフロント側で路線の駅リストと照合)"""
+    out = []
+    seen = set()
+    for m in SEC_RE.finditer(text):
+        a, b = m.group(1), m.group(2)
+        a = re.sub(r'駅$', '', a)
+        b = re.sub(r'駅間?$', '', b)
+        if (a, b) in seen:
+            continue
+        seen.add((a, b))
+        out.append({'from': a, 'to': b,
+                    'status': status or classify(text)})
+    return out
+
+
 def jr_east():
     """東北・山形・秋田・上越・北陸(JR東区間)"""
     html = fetch('https://traininfo.jreast.co.jp/train_info/shinkansen.aspx').decode('utf-8', 'replace')
@@ -66,6 +85,8 @@ def jr_east():
         else:
             st = classify(text)
         out[key] = {'status': st, 'text': text}
+        if st != 'normal':
+            out[key]['sections'] = extract_sections(text)
     if not out:
         raise ValueError('JR東: 路線ステータスをパースできず')
     return out
@@ -91,7 +112,9 @@ def jr_central():
             texts.append(o)
     walk(data)
     blob = ' '.join(texts) or '運転情報あり'
-    return {'tokaido': {'status': classify(blob), 'text': blob[:120]}}
+    st = classify(blob)
+    return {'tokaido': {'status': st, 'text': blob[:120],
+                        'sections': extract_sections(blob, st)}}
 
 
 def jr_west():
@@ -105,6 +128,7 @@ def jr_west():
             out[key] = {'status': 'normal', 'text': '平常運転'}
             continue
         conds = []
+        secs = []
         for dd in area.get('dailyData') or []:
             if dd.get('date') and dd['date'] != today:
                 continue
@@ -114,13 +138,19 @@ def jr_west():
                         cond = det.get('conditionName') or ''
                         cause = det.get('cause') or ''
                         conds.append((cond, cause))
+                        for sec in det.get('sections') or []:
+                            a = sec.get('startStation')
+                            b = sec.get('endStation')
+                            if a and b:
+                                secs.append({'from': a, 'to': b,
+                                             'status': classify(sec.get('conditionName') or cond)})
         if not conds:
             out[key] = {'status': 'normal', 'text': '平常運転'}
         else:
             worst = max((classify(c) for c, _ in conds), key=lambda s: SEVERITY[s])
             txt = ' / '.join(dict.fromkeys(
                 f'{c}({z})' if z else c for c, z in conds))[:120]
-            out[key] = {'status': worst, 'text': txt}
+            out[key] = {'status': worst, 'text': txt, 'sections': secs}
     return out
 
 
@@ -140,8 +170,10 @@ def jr_kyushu():
         else:
             txts = [e.findtext('txt') or '' for e in aif.findall('eif')]
             blob = ' '.join(txts)
-            out[key] = {'status': classify(blob),
-                        'text': (txts[0].split('\n')[0] if txts else '運行情報あり')[:120]}
+            st = classify(blob)
+            out[key] = {'status': st,
+                        'text': (txts[0].split('\n')[0] if txts else '運行情報あり')[:120],
+                        'sections': extract_sections(blob, st)}
     for key in name2key.values():
         out.setdefault(key, {'status': 'unknown', 'text': LABELS['unknown']})
     return out
@@ -165,7 +197,8 @@ def jr_hokkaido():
     blob = gaikyo + ' ' + ' '.join(parts)
     st = 'suspend' if re.search(r'見合わせ|見合せ', gaikyo) else \
          ('delay' if chien or re.search(r'遅れ|遅延', gaikyo) else 'info')
-    return {'hokkaido': {'status': st, 'text': (' '.join(parts) or gaikyo.strip())[:120]}}
+    return {'hokkaido': {'status': st, 'text': (' '.join(parts) or gaikyo.strip())[:120],
+                         'sections': extract_sections(gaikyo, st)}}
 
 
 def main():
@@ -195,8 +228,11 @@ def main():
         detail = ' / '.join(
             f"{lbl}区間: {x['text']}" for lbl, x in
             (('JR東日本', east), ('JR西日本', west)) if x)
+        secs = [s for x in cands for s in x.get('sections') or []]
         raw['hokuriku'] = {'status': worst['status'], 'text': detail[:160],
                            'source': 'JR東日本・JR西日本'}
+        if secs:
+            raw['hokuriku']['sections'] = secs
 
     now = datetime.now(JST)
 

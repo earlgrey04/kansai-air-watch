@@ -1,74 +1,140 @@
 {
- "updated": "2026-07-30T13:19:50+09:00",
+ "updated": "2026-07-30T13:55:56+09:00",
  "lines": {
   "hokkaido": {
    "status": "normal",
    "text": "平常運転",
    "source": "JR北海道",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "平常運転"
   },
   "tohoku": {
    "status": "normal",
    "text": "平常運転",
    "source": "JR東日本",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "平常運転"
   },
   "yamagata": {
    "status": "normal",
    "text": "平常運転",
    "source": "JR東日本",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "平常運転"
   },
   "akita": {
    "status": "normal",
    "text": "平常運転",
    "source": "JR東日本",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "平常運転"
   },
   "joetsu": {
    "status": "normal",
    "text": "平常運転",
    "source": "JR東日本",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "平常運転"
   },
   "hokuriku": {
    "status": "delay",
    "text": "JR東日本区間: 平常運転 / JR西日本区間: 一部列車遅延(接続待ち合わせ)",
    "source": "JR東日本・JR西日本",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "sections": [
+    {
+     "from": "敦賀",
+     "to": "富山",
+     "status": "delay"
+    }
+   ],
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "遅れあり"
   },
   "tokaido": {
    "status": "normal",
    "text": "平常運転",
    "source": "JR東海",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "平常運転"
   },
   "sanyo": {
    "status": "info",
    "text": "お知らせ(地震)",
+   "sections": [
+    {
+     "from": "新大阪",
+     "to": "博多",
+     "status": "info"
+    }
+   ],
    "source": "JR西日本",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "お知らせあり"
   },
   "kyushu": {
    "status": "info",
    "text": "＜令和8年 熊本地震に伴う運行状況について＞",
+   "sections": [
+    {
+     "from": "博多",
+     "to": "筑後船小屋",
+     "status": "info"
+    },
+    {
+     "from": "筑後船小屋",
+     "to": "熊本",
+     "status": "info"
+    },
+    {
+     "from": "熊本",
+     "to": "鹿児島中央",
+     "status": "info"
+    },
+    {
+     "from": "鳥栖",
+     "to": "熊本",
+     "status": "info"
+    },
+    {
+     "from": "熊本",
+     "to": "八代",
+     "status": "info"
+    },
+    {
+     "from": "川内",
+     "to": "隈之城",
+     "status": "info"
+    },
+    {
+     "from": "熊本",
+     "to": "肥後大津",
+     "status": "info"
+    },
+    {
+     "from": "肥後大津",
+     "to": "宮地",
+     "status": "info"
+    },
+    {
+     "from": "宮地",
+     "to": "大分",
+     "status": "info"
+    },
+    {
+     "from": "宇土",
+     "to": "三角",
+     "status": "info"
+    }
+   ],
    "source": "JR九州",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "お知らせあり"
   },
   "nishikyushu": {
    "status": "normal",
    "text": "平常運転",
    "source": "JR九州",
-   "asOf": "2026-07-30T13:19:50+09:00",
+   "asOf": "2026-07-30T13:55:56+09:00",
    "label": "平常運転"
   }
  },
