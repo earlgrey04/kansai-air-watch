@@ -27,7 +27,7 @@ INHERIT_MAX_AGE = timedelta(hours=3)
 
 SEVERITY = {'unknown': -1, 'normal': 0, 'info': 1, 'delay': 2, 'suspend': 3}
 LABELS = {'normal': '平常運転', 'info': 'お知らせあり', 'delay': '遅れあり',
-          'suspend': '運転見合わせ', 'unknown': '情報取得失敗'}
+          'suspend': '運転見合わせ・運休あり', 'unknown': '情報取得失敗'}
 
 
 def fetch(url, timeout=25):
@@ -38,7 +38,7 @@ def fetch(url, timeout=25):
 
 def classify(text):
     """本文キーワードからステータスを推定"""
-    if re.search(r'見合わせ|見合せ', text):
+    if re.search(r'見合わせ|見合せ|運行取り止め|運転取り止め|運行取りやめ|運転取りやめ', text):
         return 'suspend'
     if re.search(r'遅れ|遅延', text):
         return 'delay'
@@ -49,7 +49,12 @@ SEC_RE = re.compile(r'([一-龥ぁ-んァ-ヶーA-Za-z]{2,10})\s*[～〜~]\s*([�
 
 
 def extract_sections(text, status=None):
-    """本文から「A～B」区間を抽出(駅名の妥当性はフロント側で路線の駅リストと照合)"""
+    """本文から「A～B」区間を抽出(駅名の妥当性はフロント側で路線の駅リストと照合)。
+
+    区間ごとの状態は直後の文脈(行末まで)から判定する。
+    例:「筑後船小屋～熊本：終日運行取り止め」→ suspend、
+    　 「博多～筑後船小屋：本数を減らして運転」→ info
+    """
     out = []
     seen = set()
     for m in SEC_RE.finditer(text):
@@ -59,8 +64,16 @@ def extract_sections(text, status=None):
         if (a, b) in seen:
             continue
         seen.add((a, b))
-        out.append({'from': a, 'to': b,
-                    'status': status or classify(text)})
+        ctx = text[m.end():].split('\n', 1)[0][:60]
+        if re.search(r'見合わせ|見合せ|取り止め|取りやめ|運休', ctx):
+            sec_st = 'suspend'
+        elif re.search(r'遅れ|遅延', ctx):
+            sec_st = 'delay'
+        elif re.search(r'減らして|減便|徐行|折り返し|折返し', ctx):
+            sec_st = 'info'
+        else:
+            sec_st = status or classify(text)
+        out.append({'from': a, 'to': b, 'status': sec_st})
     return out
 
 
