@@ -81,7 +81,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v40-warn-standalone</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v41-shink-toggle</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -1154,6 +1154,10 @@ async function loadShinkansen(){
   }catch(e){ setErr('新幹線データの取得失敗: '+(e&&e.message||e)); }
 }
 function setShinkansen(){
+  { // 2度押しでOFF(ライブへ戻る)
+    const btn=document.getElementById('bShink');
+    if(btn && btn.classList.contains('on')){ setLive(); return; }
+  }
   if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
   weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
   document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
