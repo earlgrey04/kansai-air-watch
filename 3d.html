@@ -85,11 +85,22 @@
   #tsuLegend3 .chip { display:inline-block; width:18px; height:5px; border-radius:3px;
     margin-right:6px; vertical-align:middle; }
   #tsuLegend3 .hd { font-size:10.5px; color:#9fb8d6; }
+  /* 在来線モードの運行情報一覧パネル */
+  #zaiPanel { display:none; position:absolute; right:10px; bottom:44px; z-index:10;
+    background:rgba(10,30,50,.88); color:#dfeaff; border:1px solid #29496b; border-radius:10px;
+    padding:8px 12px; font:11px/1.55 system-ui,sans-serif; width:290px; }
+  #zaiPanel .hd { font-size:10.5px; color:#9fb8d6; }
+  #zaiPanel a { color:#8fc1ee; text-decoration:none; }
+  #zaiList { max-height:38vh; overflow-y:auto; margin:4px 0; }
+  .zai-row { padding:3px 4px; border-radius:6px; cursor:pointer; }
+  .zai-row:hover { background:rgba(255,255,255,.08); }
+  .zai-row b { font-size:11.5px; }
+  .zai-row .tx { color:#c9d6e5; font-size:10.5px; word-break:break-all; }
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v44-zairaisen-tsunami</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v45-zai-panel</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -129,6 +140,18 @@
   <span id="wxTime">–</span>
 </div>
 <div id="err"></div>
+<div id="zaiPanel">
+  <span class="hd">🚆 在来線 運行情報 <span id="zaiUpd"></span></span>
+  <div id="zaiList"></div>
+  <span class="hd">🟢平常 🟡お知らせ 🟠遅れ 🔴見合わせ・運休 ／ 行クリックで路線へ移動<br>
+  公式:
+  <a href="https://www3.jrhokkaido.co.jp/webunkou/" target="_blank" rel="noopener">JR北</a>・
+  <a href="https://traininfo.jreast.co.jp/train_info/" target="_blank" rel="noopener">JR東</a>・
+  <a href="https://traininfo.jr-central.co.jp/zairaisen/" target="_blank" rel="noopener">JR東海</a>・
+  <a href="https://trafficinfo.westjr.co.jp/" target="_blank" rel="noopener">JR西</a>・
+  <a href="https://www.jr-shikoku.co.jp/info/" target="_blank" rel="noopener">JR四国</a>・
+  <a href="https://www.jrkyushu.co.jp/trains/info/" target="_blank" rel="noopener">JR九州</a></span>
+</div>
 <div id="tsuLegend3">
   <span class="hd">津波情報(気象庁)</span><br>
   <span class="chip" style="background:#c800ff"></span>大津波警報<br>
@@ -363,6 +386,7 @@ function clearNewModes(){
   try{ tyStopAnim(); }catch(_){}
   if(zaiSrc){ try{ viewer.dataSources.remove(zaiSrc,true); }catch(_){} zaiSrc=null; }
   if(zaiTimer){ try{ clearInterval(zaiTimer); }catch(_){} zaiTimer=null; }
+  { const zp=document.getElementById('zaiPanel'); if(zp) zp.style.display='none'; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
   { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='none'; }
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
@@ -1224,6 +1248,36 @@ async function fetchZaiStatus(){
   }
   return null;
 }
+var zaiKeyBounds={};   // 状態キー -> 経路のバウンディングボックス(パネル行クリックのズーム用)
+const ZAI_CO_LBL={ jrh:'JR北', jre:'JR東', jrc:'JR東海', jrw:'JR西', jrs:'JR四国', jrq:'JR九州', pvt:'私鉄' };
+function zaiZoomTo(key){
+  const b=zaiKeyBounds[key];
+  if(!b) return;
+  const pad=0.25;
+  viewer.camera.flyTo({ destination:Cesium.Rectangle.fromDegrees(
+    b.minLo-pad, b.minLa-pad, b.maxLo+pad, b.maxLa+pad), duration:1.2 });
+}
+function renderZaiPanel(){
+  const list=document.getElementById('zaiList');
+  const updEl=document.getElementById('zaiUpd');
+  if(!list) return;
+  if(updEl) updEl.textContent=zaiStatus&&zaiStatus.updated? zaiStatus.updated.slice(11,16)+'時点':'';
+  const entries=Object.entries((zaiStatus&&zaiStatus.lines)||{});
+  const sev={ suspend:3, delay:2, info:1 };
+  entries.sort((a,b)=>(sev[b[1].st]||0)-(sev[a[1].st]||0));
+  if(!entries.length){
+    list.innerHTML='<div class="zai-row"><span class="tx">現在、見合わせ・遅れ等の情報はありません。</span></div>';
+    return;
+  }
+  const dot={ suspend:'🔴', delay:'🟠', info:'🟡' };
+  list.innerHTML=entries.map(([key,v])=>{
+    const co=key.split(':')[0];
+    const nm=key.split(':').slice(1).join(':');
+    return `<div class="zai-row" onclick="zaiZoomTo('${key}')">`+
+      `${dot[v.st]||'⚪'} <b>${shinkEsc(nm)}</b> <span class="hd">〔${ZAI_CO_LBL[co]||co}〕</span>`+
+      `<div class="tx">${shinkEsc(v.text||'')}</div></div>`;
+  }).join('');
+}
 function zaiLineState(ln){
   const key=(ln.co?ln.co:'pvt')+':'+zaiNorm(ln.n);
   const ent=zaiStatus&&zaiStatus.lines&&zaiStatus.lines[key];
@@ -1258,7 +1312,8 @@ function applyZaiStatus(){
   if(counts.delay) parts.push(`遅れ ${counts.delay}`);
   if(counts.info) parts.push(`お知らせ ${counts.info}`);
   upd.textContent=`在来線 運行状況 ${ts}時点 ─ ${parts.length?parts.join(' / ')+'路線':'JR全線平常運転'}`+
-    '（緑=平常 黄=お知らせ 橙=遅れ 赤=見合わせ・青灰=私鉄など情報対象外・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
+    '（一覧は右下パネル・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
+  renderZaiPanel();
   try{ viewer.scene.requestRender(); }catch(_){}
 }
 async function loadZairaisen(){
@@ -1266,10 +1321,18 @@ async function loadZairaisen(){
     if(!zaiData) zaiData=await (await fetch('rail_lines.json')).json();
     const src=new Cesium.CustomDataSource('zairaisen');
     let nJr=0, nPvt=0;
+    zaiKeyBounds={};
     for(const ln of zaiData.lines){
       let first=true;
+      const key=(ln.co?ln.co:'pvt')+':'+zaiNorm(ln.n);
+      let b=zaiKeyBounds[key];
+      if(!b){ b=zaiKeyBounds[key]={ minLo:999, maxLo:-999, minLa:999, maxLa:-999 }; }
       for(const seg of ln.coords){
         if(seg.length<2) continue;
+        for(const [lo,la] of seg){
+          if(lo<b.minLo)b.minLo=lo; if(lo>b.maxLo)b.maxLo=lo;
+          if(la<b.minLa)b.minLa=la; if(la>b.maxLa)b.maxLa=la;
+        }
         const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,1200); }
         const e=src.entities.add({ name:`${ln.n}（${ln.op}）`,
           polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
@@ -1311,6 +1374,7 @@ function setZairaisen(){
     mb.style.display='flex';
   }
   zaiJrOnly=false;
+  { const zp=document.getElementById('zaiPanel'); if(zp) zp.style.display='block'; }
   setErr('在来線データを読み込み中…');
   viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(136.5,32.2,2.45e6),
     orientation:{heading:0,pitch:Cesium.Math.toRadians(-78),roll:0}, duration:1.5 });
