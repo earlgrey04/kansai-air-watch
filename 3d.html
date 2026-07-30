@@ -69,15 +69,19 @@
   #shinkLegend a { color:#8fc1ee; text-decoration:none; }
   #shinkLegend a:hover { text-decoration:underline; }
   #shinkLegend .hd { font-size:10.5px; color:#9fb8d6; }
-  #shinkWarnBtn { display:block; width:100%; margin:2px 0 6px; font:12px sans-serif; padding:6px 10px;
-    border:none; border-radius:8px; background:rgba(20,40,64,.9); color:#cfe0f5; cursor:pointer; }
-  #shinkWarnBtn.on { background:#7a3b10; color:#ffd9a8; font-weight:700; }
-  #shinkWarnLegend { display:none; border-top:1px solid #29496b; margin-top:4px; padding-top:4px; }
+  /* ⚠️警報トグル(独立オーバーレイ)。モード切替の.on一括解除に巻き込まれない専用クラス */
+  #bWarn.warn-on { background:#7a3b10; color:#ffd9a8; font-weight:700; }
+  #warnLegend3 { display:none; position:absolute; left:10px; bottom:215px; z-index:10;
+    background:rgba(10,30,50,.85); color:#dfeaff; border:1px solid #29496b; border-radius:10px;
+    padding:8px 12px; font:11px/1.75 system-ui,sans-serif; }
+  #warnLegend3 .chip { display:inline-block; width:18px; height:5px; border-radius:3px;
+    margin-right:6px; vertical-align:middle; }
+  #warnLegend3 .hd { font-size:10.5px; color:#9fb8d6; }
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v39-shinkansen-warn</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v40-warn-standalone</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -86,6 +90,7 @@
   <div class="brk"></div>
   <button id="bWx" onclick="toggleWeather()">☁️ 雨雲</button>
   <button id="bLtn" onclick="toggleLightning()">⚡ 雷</button>
+  <button id="bWarn" onclick="toggleWarnMode()">⚠️ 警報</button>
   <button id="bEq" onclick="setQuakes()">🌏 地震</button>
   <button id="bEqHist" onclick="setHistEq()">🧊 地震の板</button>
   <button id="bVol" onclick="setVolcanoes()">🌋 火山</button>
@@ -113,17 +118,16 @@
   <span id="wxTime">–</span>
 </div>
 <div id="err"></div>
+<div id="warnLegend3">
+  <span class="hd">警報・注意報(気象庁)</span><br>
+  <span class="chip" style="background:#0c000c;border:1px solid #666"></span>特別警報(レベル5)<br>
+  <span class="chip" style="background:#aa00ab"></span>危険警報(レベル4)<br>
+  <span class="chip" style="background:#ff2800"></span>警報(レベル3)<br>
+  <span class="chip" style="background:#f2e700"></span>注意報(レベル2)<br>
+  <span class="hd" id="warnNote3">ズームで都道府県⇔市町村・クリックで警報名</span>
+</div>
 <div id="shinkLegend">
   <div id="shinkTmr" style="display:none;margin-bottom:6px;padding:6px 8px;background:rgba(88,60,160,.25);border:1px solid #5b4a9e;border-radius:8px;max-width:260px"></div>
-  <button id="shinkWarnBtn" onclick="toggleShinkWarn()">⚠️ 警報・注意報を表示</button>
-  <div id="shinkWarnLegend">
-    <span class="hd">警報・注意報(気象庁)</span><br>
-    <span class="chip" style="background:#0c000c;border:1px solid #666"></span>特別警報(レベル5)<br>
-    <span class="chip" style="background:#aa00ab"></span>危険警報(レベル4)<br>
-    <span class="chip" style="background:#ff2800"></span>警報(レベル3)<br>
-    <span class="chip" style="background:#f2e700"></span>注意報(レベル2)<br>
-    <span class="hd" id="shinkWarnNote">ズームで都道府県⇔市町村・クリックで警報名</span>
-  </div>
   <span class="hd">運行状況の色</span><br>
   <span class="chip" style="background:#2ecc71"></span>平常運転<br>
   <span class="chip" style="background:#f1c40f"></span>お知らせ・運転変更<br>
@@ -332,7 +336,6 @@ function clearNewModes(){
   if(shinkStTimer){ try{ clearInterval(shinkStTimer); }catch(_){} shinkStTimer=null; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
   { const lg=document.getElementById('shinkLegend'); if(lg) lg.style.display='none'; }
-  try{ clearShinkWarn(); }catch(_){}
   if(cableSrc){ try{ viewer.dataSources.remove(cableSrc,true); }catch(_){} cableSrc=null; }
   if(landingSrc){ try{ viewer.dataSources.remove(landingSrc,true); }catch(_){} landingSrc=null; }
   if(windTickRemove){ try{ windTickRemove(); }catch(_){} windTickRemove=null; }
@@ -1147,8 +1150,7 @@ async function loadShinkansen(){
     const st=await fetchShinkStatus();
     applyShinkStatus(st);
     if(!st) setErr('運行情報の取得に失敗（経路のみ表示）');
-    shinkStTimer=setInterval(async()=>{ const s=await fetchShinkStatus(); if(s) applyShinkStatus(s);
-      if(warn3On) refreshWarn3(); }, 5*60*1000);
+    shinkStTimer=setInterval(async()=>{ const s=await fetchShinkStatus(); if(s) applyShinkStatus(s); }, 5*60*1000);
   }catch(e){ setErr('新幹線データの取得失敗: '+(e&&e.message||e)); }
 }
 function setShinkansen(){
@@ -1186,7 +1188,7 @@ const WARN3_URLS=[
 ];
 const WARN3_MUNI_HEIGHT=1.2e6;  // カメラ高度がこれ未満なら市町村単位表示
 var warn3On=false, warn3Src=null, warn3Data=null, warn3OfficeMax={}, warn3Busy=false;
-var warn3CamRemove=null, warn3MuniMode=null;
+var warn3CamRemove=null, warn3MuniMode=null, warn3Timer=null;
 
 async function fetchWarn3Data(){
   for(const s of WARN3_URLS){
@@ -1240,15 +1242,16 @@ async function refreshWarn3(){
   warn3Data=d;
   computeWarn3OfficeMax();
   const t=d.reportDatetime ? d.reportDatetime.slice(11,16) : '--:--';
-  const note=document.getElementById('shinkWarnNote');
+  const note=document.getElementById('warnNote3');
   if(note) note.textContent=`気象庁 ${t}時点・ズームで都道府県⇔市町村・クリックで警報名`;
   restyleWarn3();
   return true;
 }
-async function toggleShinkWarn(){
+// ⚠️警報・注意報: どのモードとも共存する独立オーバーレイ(モード切替でも消えない)
+async function toggleWarnMode(){
   if(warn3Busy) return;
-  const btn=document.getElementById('shinkWarnBtn');
-  const lg=document.getElementById('shinkWarnLegend');
+  const btn=document.getElementById('bWarn');
+  const lg=document.getElementById('warnLegend3');
   if(!warn3On){
     warn3Busy=true;
     btn.textContent='⚠️ 読み込み中…';
@@ -1257,11 +1260,11 @@ async function toggleShinkWarn(){
         const src=await Cesium.GeoJsonDataSource.load('warn_areas.json',{ clampToGround:true, fill:Cesium.Color.TRANSPARENT, stroke:Cesium.Color.TRANSPARENT });
         warn3Src=src;
         await viewer.dataSources.add(src);
-        viewer.dataSources.lowerToBottom(src);  // 新幹線の線より下に
+        viewer.dataSources.lowerToBottom(src);  // 他レイヤーの線より下に
       } else { warn3Src.show=true; }
       const ok=await refreshWarn3();
       if(!ok) throw new Error('warn data');
-      warn3On=true; btn.classList.add('on'); btn.textContent='⚠️ 警報・注意報を非表示';
+      warn3On=true; btn.classList.add('warn-on');
       if(lg) lg.style.display='block';
       // カメラ高度で官署⇔市町村を自動切替
       if(!warn3CamRemove){
@@ -1269,26 +1272,21 @@ async function toggleShinkWarn(){
           if(warn3On && warn3MuniMode!==warn3IsMuni()) restyleWarn3();
         });
       }
+      if(!warn3Timer) warn3Timer=setInterval(()=>{ if(warn3On) refreshWarn3(); }, 5*60*1000);
+      btn.textContent='⚠️ 警報';
     }catch(e){
-      btn.textContent='⚠️ 取得失敗(再試行可)';
-      setTimeout(()=>{ if(!warn3On) btn.textContent='⚠️ 警報・注意報を表示'; },4000);
+      btn.textContent='⚠️ 取得失敗';
+      setTimeout(()=>{ if(!warn3On) btn.textContent='⚠️ 警報'; },4000);
     }
     warn3Busy=false;
   } else {
     warn3On=false;
     if(warn3Src) warn3Src.show=false;
-    btn.classList.remove('on'); btn.textContent='⚠️ 警報・注意報を表示';
+    if(warn3Timer){ clearInterval(warn3Timer); warn3Timer=null; }
+    btn.classList.remove('warn-on'); btn.textContent='⚠️ 警報';
     if(lg) lg.style.display='none';
     try{ viewer.scene.requestRender(); }catch(_){}
   }
-}
-function clearShinkWarn(){  // clearNewModesから呼ぶ後始末
-  warn3On=false; warn3Data=null; warn3OfficeMax={}; warn3MuniMode=null;
-  if(warn3CamRemove){ try{ warn3CamRemove(); }catch(_){} warn3CamRemove=null; }
-  if(warn3Src){ try{ viewer.dataSources.remove(warn3Src,true); }catch(_){} warn3Src=null; }
-  const btn=document.getElementById('shinkWarnBtn');
-  if(btn){ btn.classList.remove('on'); btn.textContent='⚠️ 警報・注意報を表示'; }
-  const lg=document.getElementById('shinkWarnLegend'); if(lg) lg.style.display='none';
 }
 
 // ===== 海底ケーブル（TeleGeography・color=ケーブル別／陸揚局＝黄点）=====
