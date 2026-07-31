@@ -105,7 +105,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v50-pressure</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v51-pressure-fine</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -1622,16 +1622,17 @@ async function toggleTsunami(){
 // ===== 気圧配置（Open-Meteo GFS 海面更正気圧→等圧線4hPa毎。独立オーバーレイ） =====
 var pressOn=false, pressSrc=null, pressTimer=null, pressBusy=false;
 async function loadPressureGrid(){
-  const lat0=16, lat1=52, lon0=112, lon1=164, step=1.25;
+  const lat0=16, lat1=52, lon0=112, lon1=164, step=1.0;
   const gLat=[], gLon=[];
   for(let la=lat0; la<=lat1+1e-9; la+=step) gLat.push(la);
   for(let lo=lon0; lo<=lon1+1e-9; lo+=step) gLon.push(lo);
   const pts=[];
   for(const la of gLat) for(const lo of gLon) pts.push([la,lo]);
-  // 2バッチに分けて取得(1リクエスト600点程度に抑える)
-  const half=Math.ceil(pts.length/2);
+  // 1リクエスト500点程度に分割して取得
   const results=new Array(pts.length);
-  for(const [s,e] of [[0,half],[half,pts.length]]){
+  const B=Math.ceil(pts.length/4);
+  const ranges=[]; for(let s=0;s<pts.length;s+=B) ranges.push([s,Math.min(s+B,pts.length)]);
+  for(const [s,e] of ranges){
     const chunk=pts.slice(s,e);
     const url=`https://api.open-meteo.com/v1/gfs?latitude=${chunk.map(p=>p[0]).join(',')}`+
       `&longitude=${chunk.map(p=>p[1]).join(',')}&hourly=pressure_msl&forecast_days=1&timeformat=unixtime`;
@@ -1728,16 +1729,19 @@ async function refreshPressure(){
   pressSrc.show=true;
   let lo=Infinity, hi=-Infinity;
   for(const row of g.P) for(const v of row){ if(!isNaN(v)){ if(v<lo)lo=v; if(v>hi)hi=v; } }
-  const l0=Math.ceil(lo/4)*4, l1=Math.floor(hi/4)*4;
-  for(let level=l0; level<=l1; level+=4){
-    const major=level%20===0;
-    const col=Cesium.Color.WHITE.withAlpha(major?0.95:0.75);
+  const l0=Math.ceil(lo/2)*2, l1=Math.floor(hi/2)*2;
+  for(let level=l0; level<=l1; level+=2){
+    const major=level%20===0;      // 20hPa毎: 太実線
+    const solid=level%4===0;       // 4hPa毎: 実線 / その間の2hPa: 破線の補助線
+    const col=Cesium.Color.WHITE.withAlpha(major?0.95:(solid?0.85:0.55));
     for(const chain of pressContours(g, level)){
       const pos=[]; for(const [x,y] of chain){ pos.push(x,y,3500); }
       pressSrc.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
-        width:major?2.6:1.4, material:col, depthFailMaterial:col.withAlpha(0.35), arcType:Cesium.ArcType.GEODESIC } });
-      // ラベル(ある程度長い線の中点に)
-      if(chain.length>=14){
+        width:major?2.6:(solid?1.5:1.0),
+        material:solid?col:new Cesium.PolylineDashMaterialProperty({ color:col, dashLength:10 }),
+        depthFailMaterial:col.withAlpha(0.3), arcType:Cesium.ArcType.GEODESIC } });
+      // ラベル(実線のある程度長い線の中点に)
+      if(solid && chain.length>=14){
         const mid=chain[Math.floor(chain.length/2)];
         pressSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(mid[0],mid[1],3600),
           label:{ text:String(level), font:(major?'bold ':'')+'11px sans-serif',
@@ -1758,7 +1762,7 @@ async function refreshPressure(){
   const note=document.getElementById('pressNote');
   if(note){
     const t=g.tUsed? new Date(g.tUsed*1000) : null;
-    note.textContent=`気圧配置(海面更正) 等圧線4hPa毎・太線20hPa毎 `+
+    note.textContent=`気圧配置(海面更正) 実線4hPa毎・破線2hPa毎・太線20hPa毎 `+
       (t?`${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,'0')}時`:'')+' GFS/Open-Meteo';
   }
   try{ viewer.scene.requestRender(); }catch(_){}
