@@ -101,11 +101,28 @@
   .zai-row:hover { background:rgba(255,255,255,.08); }
   .zai-row b { font-size:11.5px; }
   .zai-row .tx { color:#c9d6e5; font-size:10.5px; word-break:break-all; }
+
+  /* ===== モバイル調整(新設パネル・凡例類) ===== */
+  @media (max-width: 700px) {
+    #hud { top: 208px; max-width: 62vw; font-size: 10px; line-height: 1.3; padding: 5px 8px; }
+    #shinkLegend { right: 6px; bottom: 96px; max-width: 52vw; font-size: 10px;
+      line-height: 1.55; padding: 6px 9px; }
+    #shinkTmr { max-width: 46vw !important; }
+    #warnLegend3 { left: 6px; bottom: 96px; max-width: 36vw; font-size: 9.5px;
+      line-height: 1.5; padding: 5px 8px; }
+    #tsuLegend3 { left: 6px; bottom: 300px; max-width: 44vw; font-size: 9.5px;
+      line-height: 1.5; padding: 5px 8px; }
+    #zaiPanel { right: 6px; bottom: 96px; width: 54vw; font-size: 10px; padding: 6px 9px; }
+    #zaiList { max-height: 24vh; }
+    #pressNote { left: 6px; bottom: 4px; font-size: 9px; max-width: 60vw; }
+    #warnLegend3 .chip, #tsuLegend3 .chip, #shinkLegend .chip { width: 13px; }
+    .cesium-viewer-animationContainer { transform: scale(0.6); transform-origin: bottom left; }
+  }
 </style>
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v54-pressure-status</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v55-mobile-tune</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
