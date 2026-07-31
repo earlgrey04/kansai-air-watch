@@ -105,7 +105,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v51-pressure-fine</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v53-pressure-robust</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -1620,24 +1620,33 @@ async function toggleTsunami(){
 }
 
 // ===== 気圧配置（Open-Meteo GFS 海面更正気圧→等圧線4hPa毎。独立オーバーレイ） =====
-var pressOn=false, pressSrc=null, pressTimer=null, pressBusy=false;
+var pressOn=false, pressSrc=null, pressTimer=null, pressBusy=false, pressCache=null, pressCacheAt=0;
 async function loadPressureGrid(){
-  const lat0=16, lat1=52, lon0=112, lon1=164, step=1.0;
+  const lat0=16, lat1=52, lon0=112, lon1=164, step=1.25;
   const gLat=[], gLon=[];
   for(let la=lat0; la<=lat1+1e-9; la+=step) gLat.push(la);
   for(let lo=lon0; lo<=lon1+1e-9; lo+=step) gLon.push(lo);
   const pts=[];
   for(const la of gLat) for(const lo of gLon) pts.push([la,lo]);
-  // 1リクエスト500点程度に分割して取得
+  // 1リクエスト約620点に分割し、失敗バッチは再試行。それでも欠けたら明示エラー
   const results=new Array(pts.length);
-  const B=Math.ceil(pts.length/4);
+  const B=Math.ceil(pts.length/2);
   const ranges=[]; for(let s=0;s<pts.length;s+=B) ranges.push([s,Math.min(s+B,pts.length)]);
   for(const [s,e] of ranges){
     const chunk=pts.slice(s,e);
     const url=`https://api.open-meteo.com/v1/gfs?latitude=${chunk.map(p=>p[0]).join(',')}`+
       `&longitude=${chunk.map(p=>p[1]).join(',')}&hourly=pressure_msl&forecast_days=1&timeformat=unixtime`;
-    const res=await (await fetch(url)).json();
-    const arr=Array.isArray(res)?res:[res];
+    let arr=null;
+    for(let tryi=0;tryi<3;tryi++){
+      try{
+        const r=await fetch(url);
+        if(r.ok){ const res=await r.json(); arr=Array.isArray(res)?res:[res];
+          if(arr[0]&&arr[0].hourly) break; }
+        arr=null;
+      }catch(_){ arr=null; }
+      await new Promise(rs=>setTimeout(rs,2500*(tryi+1)));
+    }
+    if(!arr) throw new Error('気圧データの取得失敗(混雑中。少し待って再試行してください)');
     for(let k=0;k<arr.length;k++) results[s+k]=arr[k];
   }
   const now=Date.now()/1000;
@@ -1652,6 +1661,48 @@ async function loadPressureGrid(){
     P[Math.floor(k/nLo)][k%nLo]=h.pressure_msl[ti];
   }
   return { P, gLat, gLon, nLa, nLo, tUsed };
+}
+// 双三次(Catmull-Rom)補間で格子をf倍に細分化 → 等圧線が滑らかになる
+function pressRefine(g, f){
+  const { P, gLat, gLon, nLa, nLo }=g;
+  const cr=(p0,p1,p2,p3,t)=>0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t*t+(-p0+3*p1-3*p2+p3)*t*t*t);
+  const at=(i,j)=>{ const ii=Math.max(0,Math.min(nLa-1,i)), jj=Math.max(0,Math.min(nLo-1,j)); return P[ii][jj]; };
+  const nLa2=(nLa-1)*f+1, nLo2=(nLo-1)*f+1;
+  const P2=[]; for(let i=0;i<nLa2;i++) P2.push(new Array(nLo2));
+  const gLat2=[], gLon2=[];
+  for(let i=0;i<nLa2;i++) gLat2.push(gLat[0]+(gLat[nLa-1]-gLat[0])*i/(nLa2-1));
+  for(let j=0;j<nLo2;j++) gLon2.push(gLon[0]+(gLon[nLo-1]-gLon[0])*j/(nLo2-1));
+  for(let i=0;i<nLa2;i++){
+    const fi=i/f, i1=Math.min(nLa-2,Math.floor(fi)), ti=fi-i1;
+    for(let j=0;j<nLo2;j++){
+      const fj=j/f, j1=Math.min(nLo-2,Math.floor(fj)), tj=fj-j1;
+      const rows=[];
+      let bad=false;
+      for(let di=-1;di<=2;di++){
+        const a=at(i1+di,j1-1), b=at(i1+di,j1), c=at(i1+di,j1+1), d=at(i1+di,j1+2);
+        if([a,b,c,d].some(x=>isNaN(x))){ bad=true; break; }
+        rows.push(cr(a,b,c,d,tj));
+      }
+      P2[i][j]=bad? NaN : cr(rows[0],rows[1],rows[2],rows[3],ti);
+    }
+  }
+  return { P:P2, gLat:gLat2, gLon:gLon2, nLa:nLa2, nLo:nLo2, tUsed:g.tUsed };
+}
+// チャイキン平滑化(角の丸め)
+function pressSmooth(chain, iter){
+  let c=chain;
+  for(let k=0;k<iter;k++){
+    if(c.length<3) return c;
+    const out=[c[0]];
+    for(let i=0;i<c.length-1;i++){
+      const p=c[i], q=c[i+1];
+      out.push([p[0]*0.75+q[0]*0.25, p[1]*0.75+q[1]*0.25]);
+      out.push([p[0]*0.25+q[0]*0.75, p[1]*0.25+q[1]*0.75]);
+    }
+    out.push(c[c.length-1]);
+    c=out;
+  }
+  return c;
 }
 function pressContours(g, level){
   // marching squares: セグメント列→端点ハッシュで連結してチェーン化
@@ -1722,11 +1773,14 @@ function pressExtrema(g){
   }
   return out;
 }
-async function refreshPressure(){
-  const g=await loadPressureGrid();
+async function refreshPressure(force){
+  let g;
+  if(!force && pressCache && Date.now()-pressCacheAt < 20*60*1000){ g=pressCache; }
+  else { g=await loadPressureGrid(); pressCache=g; pressCacheAt=Date.now(); }
   if(!pressSrc){ pressSrc=new Cesium.CustomDataSource('pressure'); viewer.dataSources.add(pressSrc); }
   pressSrc.entities.removeAll();
   pressSrc.show=true;
+  const gf=pressRefine(g, 4);   // 約0.3°相当に細分化して滑らかな等圧線に
   let lo=Infinity, hi=-Infinity;
   for(const row of g.P) for(const v of row){ if(!isNaN(v)){ if(v<lo)lo=v; if(v>hi)hi=v; } }
   const l0=Math.ceil(lo/2)*2, l1=Math.floor(hi/2)*2;
@@ -1734,14 +1788,15 @@ async function refreshPressure(){
     const major=level%20===0;      // 20hPa毎: 太実線
     const solid=level%4===0;       // 4hPa毎: 実線 / その間の2hPa: 破線の補助線
     const col=Cesium.Color.WHITE.withAlpha(major?0.95:(solid?0.85:0.55));
-    for(const chain of pressContours(g, level)){
+    for(let chain of pressContours(gf, level)){
+      chain=pressSmooth(chain, 1);
       const pos=[]; for(const [x,y] of chain){ pos.push(x,y,3500); }
       pressSrc.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
         width:major?2.6:(solid?1.5:1.0),
         material:solid?col:new Cesium.PolylineDashMaterialProperty({ color:col, dashLength:10 }),
         depthFailMaterial:col.withAlpha(0.3), arcType:Cesium.ArcType.GEODESIC } });
       // ラベル(実線のある程度長い線の中点に)
-      if(solid && chain.length>=14){
+      if(solid && chain.length>=60){
         const mid=chain[Math.floor(chain.length/2)];
         pressSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(mid[0],mid[1],3600),
           label:{ text:String(level), font:(major?'bold ':'')+'11px sans-serif',
@@ -1778,7 +1833,7 @@ async function togglePressure(){
     try{
       await refreshPressure();
       pressOn=true; btn.classList.add('press-on');
-      if(!pressTimer) pressTimer=setInterval(()=>{ if(pressOn) refreshPressure(); }, 30*60*1000);
+      if(!pressTimer) pressTimer=setInterval(()=>{ if(pressOn) refreshPressure(true); }, 60*60*1000);
       btn.textContent='🌐 気圧';
     }catch(e){
       btn.textContent='🌐 取得失敗';
