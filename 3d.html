@@ -79,6 +79,11 @@
   #warnLegend3 .hd { font-size:10.5px; color:#9fb8d6; }
   /* 🌊津波トグル(独立オーバーレイ) */
   #bTsu.tsu-on { background:#0e5a7a; color:#bfe9ff; font-weight:700; }
+  /* 🌐気圧トグル(独立オーバーレイ) */
+  #bPress.press-on { background:#3d5a10; color:#e2ffb8; font-weight:700; }
+  #pressNote { display:none; position:absolute; left:195px; bottom:40px; z-index:10;
+    background:rgba(10,30,50,.8); color:#cfe0f5; border:1px solid #29496b; border-radius:8px;
+    padding:4px 10px; font:10.5px system-ui,sans-serif; }
   #tsuLegend3 { display:none; position:absolute; left:10px; bottom:410px; z-index:10;
     background:rgba(10,30,50,.85); color:#dfeaff; border:1px solid #29496b; border-radius:10px;
     padding:8px 12px; font:11px/1.75 system-ui,sans-serif; max-width:250px; }
@@ -100,7 +105,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v49-rail-overlay</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v50-pressure</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -119,6 +124,7 @@
   <button id="bShink" onclick="setShinkansen()">🚄 新幹線</button>
   <button id="bZai" onclick="setZairaisen()">🚆 在来線</button>
   <button id="bTsu" onclick="toggleTsunami()">🌊 津波</button>
+  <button id="bPress" onclick="togglePressure()">🌐 気圧</button>
   <button id="bTy" onclick="setTyphoon()">🌀 台風</button>
   <button id="bCable" onclick="setCables()">🔌 海底ケーブル</button>
   <button id="bWind" onclick="setWind()">🌬️ 上空の風</button>
@@ -152,6 +158,7 @@
   <a href="https://www.jr-shikoku.co.jp/info/" target="_blank" rel="noopener">JR四国</a>・
   <a href="https://www.jrkyushu.co.jp/trains/info/" target="_blank" rel="noopener">JR九州</a></span>
 </div>
+<div id="pressNote">気圧配置 読み込み中…</div>
 <div id="tsuLegend3">
   <span class="hd">津波情報(気象庁)</span><br>
   <span class="chip" style="background:#c800ff"></span>大津波警報<br>
@@ -1608,6 +1615,179 @@ async function toggleTsunami(){
     if(tsuTimer){ clearInterval(tsuTimer); tsuTimer=null; }
     btn.classList.remove('tsu-on'); btn.textContent='🌊 津波';
     if(lg) lg.style.display='none';
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }
+}
+
+// ===== 気圧配置（Open-Meteo GFS 海面更正気圧→等圧線4hPa毎。独立オーバーレイ） =====
+var pressOn=false, pressSrc=null, pressTimer=null, pressBusy=false;
+async function loadPressureGrid(){
+  const lat0=16, lat1=52, lon0=112, lon1=164, step=1.25;
+  const gLat=[], gLon=[];
+  for(let la=lat0; la<=lat1+1e-9; la+=step) gLat.push(la);
+  for(let lo=lon0; lo<=lon1+1e-9; lo+=step) gLon.push(lo);
+  const pts=[];
+  for(const la of gLat) for(const lo of gLon) pts.push([la,lo]);
+  // 2バッチに分けて取得(1リクエスト600点程度に抑える)
+  const half=Math.ceil(pts.length/2);
+  const results=new Array(pts.length);
+  for(const [s,e] of [[0,half],[half,pts.length]]){
+    const chunk=pts.slice(s,e);
+    const url=`https://api.open-meteo.com/v1/gfs?latitude=${chunk.map(p=>p[0]).join(',')}`+
+      `&longitude=${chunk.map(p=>p[1]).join(',')}&hourly=pressure_msl&forecast_days=1&timeformat=unixtime`;
+    const res=await (await fetch(url)).json();
+    const arr=Array.isArray(res)?res:[res];
+    for(let k=0;k<arr.length;k++) results[s+k]=arr[k];
+  }
+  const now=Date.now()/1000;
+  const nLa=gLat.length, nLo=gLon.length;
+  const P=[]; for(let i=0;i<nLa;i++) P.push(new Array(nLo).fill(NaN));
+  let tUsed=null;
+  for(let k=0;k<pts.length;k++){
+    const h=results[k]&&results[k].hourly;
+    if(!h) continue;
+    let ti=0; for(let t=0;t<h.time.length;t++){ if(h.time[t]<=now) ti=t; }
+    tUsed=h.time[ti];
+    P[Math.floor(k/nLo)][k%nLo]=h.pressure_msl[ti];
+  }
+  return { P, gLat, gLon, nLa, nLo, tUsed };
+}
+function pressContours(g, level){
+  // marching squares: セグメント列→端点ハッシュで連結してチェーン化
+  const segs=[];
+  const { P, gLat, gLon, nLa, nLo }=g;
+  const interp=(va,vb,pa,pb)=>{ const t=(level-va)/(vb-va); return [pa[0]+(pb[0]-pa[0])*t, pa[1]+(pb[1]-pa[1])*t]; };
+  for(let i=0;i<nLa-1;i++) for(let j=0;j<nLo-1;j++){
+    const v=[P[i][j],P[i][j+1],P[i+1][j+1],P[i+1][j]];
+    if(v.some(x=>isNaN(x))) continue;
+    const c=[[gLon[j],gLat[i]],[gLon[j+1],gLat[i]],[gLon[j+1],gLat[i+1]],[gLon[j],gLat[i+1]]];
+    const idx=(v[0]>=level?8:0)|(v[1]>=level?4:0)|(v[2]>=level?2:0)|(v[3]>=level?1:0);
+    if(idx===0||idx===15) continue;
+    const E=(a,b)=>interp(v[a],v[b],c[a],c[b]);
+    const T={1:[[3,0,2,3]],2:[[1,2,2,3]],3:[[1,2,3,0]],4:[[0,1,1,2]],5:[[0,1,1,2],[3,0,2,3]],6:[[0,1,2,3]],7:[[0,1,3,0]],
+             8:[[0,1,3,0]],9:[[0,1,2,3]],10:[[0,1,1,2],[2,3,3,0]],11:[[0,1,1,2]],12:[[1,2,3,0]],13:[[1,2,2,3]],14:[[3,0,2,3]]}[idx];
+    for(const [a1,b1,a2,b2] of T) segs.push([E(a1,b1),E(a2,b2)]);
+  }
+  // チェーン連結
+  const key=p=>p[0].toFixed(3)+','+p[1].toFixed(3);
+  const chains=[]; const used=new Array(segs.length).fill(false);
+  const endIdx={};
+  segs.forEach((s,i)=>{ (endIdx[key(s[0])]=endIdx[key(s[0])]||[]).push(i); (endIdx[key(s[1])]=endIdx[key(s[1])]||[]).push(i); });
+  for(let i=0;i<segs.length;i++){
+    if(used[i]) continue;
+    used[i]=true;
+    const chain=[segs[i][0],segs[i][1]];
+    let ext=true;
+    while(ext){
+      ext=false;
+      for(const [pt,push] of [[chain[chain.length-1],'tail'],[chain[0],'head']]){
+        const cands=endIdx[key(pt)]||[];
+        for(const ci of cands){
+          if(used[ci]) continue;
+          const s=segs[ci];
+          let nxt=null;
+          if(key(s[0])===key(pt)) nxt=s[1];
+          else if(key(s[1])===key(pt)) nxt=s[0];
+          if(!nxt) continue;
+          used[ci]=true;
+          if(push==='tail') chain.push(nxt); else chain.unshift(nxt);
+          ext=true;
+          break;
+        }
+        if(ext) break;
+      }
+    }
+    if(chain.length>=4) chains.push(chain);
+  }
+  return chains;
+}
+function pressExtrema(g){
+  const out=[];
+  const { P, gLat, gLon, nLa, nLo }=g;
+  const W=3;
+  for(let i=W;i<nLa-W;i++) for(let j=W;j<nLo-W;j++){
+    const v=P[i][j];
+    if(isNaN(v)) continue;
+    let isMin=true, isMax=true;
+    for(let di=-W;di<=W;di++) for(let dj=-W;dj<=W;dj++){
+      if(!di&&!dj) continue;
+      const u=P[i+di][j+dj];
+      if(isNaN(u)){ isMin=isMax=false; continue; }
+      if(u<=v) isMin=false;
+      if(u>=v) isMax=false;
+    }
+    if(isMin) out.push({ type:'低', lat:gLat[i], lon:gLon[j], p:v });
+    if(isMax) out.push({ type:'高', lat:gLat[i], lon:gLon[j], p:v });
+  }
+  return out;
+}
+async function refreshPressure(){
+  const g=await loadPressureGrid();
+  if(!pressSrc){ pressSrc=new Cesium.CustomDataSource('pressure'); viewer.dataSources.add(pressSrc); }
+  pressSrc.entities.removeAll();
+  pressSrc.show=true;
+  let lo=Infinity, hi=-Infinity;
+  for(const row of g.P) for(const v of row){ if(!isNaN(v)){ if(v<lo)lo=v; if(v>hi)hi=v; } }
+  const l0=Math.ceil(lo/4)*4, l1=Math.floor(hi/4)*4;
+  for(let level=l0; level<=l1; level+=4){
+    const major=level%20===0;
+    const col=Cesium.Color.WHITE.withAlpha(major?0.95:0.75);
+    for(const chain of pressContours(g, level)){
+      const pos=[]; for(const [x,y] of chain){ pos.push(x,y,3500); }
+      pressSrc.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
+        width:major?2.6:1.4, material:col, depthFailMaterial:col.withAlpha(0.35), arcType:Cesium.ArcType.GEODESIC } });
+      // ラベル(ある程度長い線の中点に)
+      if(chain.length>=14){
+        const mid=chain[Math.floor(chain.length/2)];
+        pressSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(mid[0],mid[1],3600),
+          label:{ text:String(level), font:(major?'bold ':'')+'11px sans-serif',
+            fillColor:Cesium.Color.WHITE, outlineColor:Cesium.Color.BLACK, outlineWidth:3,
+            style:Cesium.LabelStyle.FILL_AND_OUTLINE } });
+      }
+    }
+  }
+  for(const ex of pressExtrema(g)){
+    const isL=ex.type==='低';
+    pressSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(ex.lon,ex.lat,3700),
+      name:`${ex.type}気圧 ${Math.round(ex.p)}hPa`,
+      description:`<div style="font-size:13px"><b>${ex.type}気圧</b> 中心 ${Math.round(ex.p)}hPa<br><span style="color:#889">GFS/Open-Meteo</span></div>`,
+      label:{ text:`${ex.type}\n${Math.round(ex.p)}`, font:'bold 15px sans-serif',
+        fillColor:isL?Cesium.Color.fromCssColorString('#ff5a4d'):Cesium.Color.fromCssColorString('#63b3ff'),
+        outlineColor:Cesium.Color.BLACK, outlineWidth:4, style:Cesium.LabelStyle.FILL_AND_OUTLINE } });
+  }
+  const note=document.getElementById('pressNote');
+  if(note){
+    const t=g.tUsed? new Date(g.tUsed*1000) : null;
+    note.textContent=`気圧配置(海面更正) 等圧線4hPa毎・太線20hPa毎 `+
+      (t?`${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,'0')}時`:'')+' GFS/Open-Meteo';
+  }
+  try{ viewer.scene.requestRender(); }catch(_){}
+}
+async function togglePressure(){
+  if(pressBusy) return;
+  const btn=document.getElementById('bPress');
+  const note=document.getElementById('pressNote');
+  if(!pressOn){
+    pressBusy=true;
+    btn.textContent='🌐 読み込み中…';
+    if(note){ note.style.display='block'; note.textContent='気圧配置 読み込み中…'; }
+    try{
+      await refreshPressure();
+      pressOn=true; btn.classList.add('press-on');
+      if(!pressTimer) pressTimer=setInterval(()=>{ if(pressOn) refreshPressure(); }, 30*60*1000);
+      btn.textContent='🌐 気圧';
+    }catch(e){
+      btn.textContent='🌐 取得失敗';
+      if(note) note.style.display='none';
+      setTimeout(()=>{ if(!pressOn) btn.textContent='🌐 気圧'; },4000);
+    }
+    pressBusy=false;
+  } else {
+    pressOn=false;
+    if(pressSrc) pressSrc.show=false;
+    if(pressTimer){ clearInterval(pressTimer); pressTimer=null; }
+    btn.classList.remove('press-on'); btn.textContent='🌐 気圧';
+    if(note) note.style.display='none';
     try{ viewer.scene.requestRender(); }catch(_){}
   }
 }
