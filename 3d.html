@@ -105,7 +105,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v53-pressure-robust</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v54-pressure-status</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -1621,6 +1621,31 @@ async function toggleTsunami(){
 
 // ===== 気圧配置（Open-Meteo GFS 海面更正気圧→等圧線4hPa毎。独立オーバーレイ） =====
 var pressOn=false, pressSrc=null, pressTimer=null, pressBusy=false, pressCache=null, pressCacheAt=0;
+// statusブランチ配信の気圧グリッド(ブラウザからOpen-Meteoを直接叩かない)
+const PRESS_URLS=[
+  { url:'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/pressure_grid.json?ref=status',
+    opts:{ headers:{ 'Accept':'application/vnd.github.raw+json' } } },
+  { url:'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/pressure_grid.json', bust:true },
+  { url:'pressure_grid.json' },
+];
+async function loadPressureFromStatus(){
+  for(const s of PRESS_URLS){
+    try{
+      const u=s.bust ? s.url+'?t='+Date.now() : s.url;
+      const r=await fetch(u,{ cache:'no-store', ...(s.opts||{}) });
+      if(!r.ok) continue;
+      const d=await r.json();
+      if(!d||!d.P||!d.nLa) continue;
+      if(Date.now()/1000 - (d.fetchedAtUnix||0) > 4*3600) continue;  // 4時間超は鮮度切れ
+      const gLat=[], gLon=[];
+      for(let i=0;i<d.nLa;i++) gLat.push(d.lat0+d.step*i);
+      for(let j=0;j<d.nLo;j++) gLon.push(d.lon0+d.step*j);
+      const P=d.P.map(row=>row.map(v=>v==null?NaN:v));
+      return { P, gLat, gLon, nLa:d.nLa, nLo:d.nLo, tUsed:d.tUsed };
+    }catch(_){}
+  }
+  return null;
+}
 async function loadPressureGrid(){
   const lat0=16, lat1=52, lon0=112, lon1=164, step=1.25;
   const gLat=[], gLon=[];
@@ -1776,7 +1801,11 @@ function pressExtrema(g){
 async function refreshPressure(force){
   let g;
   if(!force && pressCache && Date.now()-pressCacheAt < 20*60*1000){ g=pressCache; }
-  else { g=await loadPressureGrid(); pressCache=g; pressCacheAt=Date.now(); }
+  else {
+    g=await loadPressureFromStatus();       // 第一候補: statusブランチ(レート制限なし)
+    if(!g) g=await loadPressureGrid();      // フォールバック: Open-Meteo直接
+    pressCache=g; pressCacheAt=Date.now();
+  }
   if(!pressSrc){ pressSrc=new Cesium.CustomDataSource('pressure'); viewer.dataSources.add(pressSrc); }
   pressSrc.entities.removeAll();
   pressSrc.show=true;
