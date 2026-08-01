@@ -122,7 +122,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v56-highway</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v57-cross-overlay</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -419,6 +419,8 @@ function clearNewModes(){
   if(zaiTimer){ try{ clearInterval(zaiTimer); }catch(_){} zaiTimer=null; }
   zaiSecEnts=[];
   if(hwySrc){ try{ viewer.dataSources.remove(hwySrc,true); }catch(_){} hwySrc=null; }
+  if(zaiHwySrc){ try{ viewer.dataSources.remove(zaiHwySrc,true); }catch(_){} zaiHwySrc=null; }
+  if(hwyZaiSrc){ try{ viewer.dataSources.remove(hwyZaiSrc,true); }catch(_){} hwyZaiSrc=null; }
   if(hwyEvSrc){ try{ viewer.dataSources.remove(hwyEvSrc,true); }catch(_){} hwyEvSrc=null; }
   if(hwyTimer){ try{ clearInterval(hwyTimer); }catch(_){} hwyTimer=null; }
   { const hp=document.getElementById('hwyPanel'); if(hp) hp.style.display='none'; }
@@ -1511,6 +1513,7 @@ async function loadZairaisen(){
     zaiStatus=await fetchZaiStatus();
     applyZaiStatus();
     if(zaiShinkOn) zaiDrawShink();
+    if(zaiHwyOn) zaiDrawHwy();
     if(!zaiStatus) setErr('運行情報の取得に失敗(経路のみ表示)');
   }catch(e){ setErr('在来線データの取得失敗: '+(e&&e.message||e)); }
 }
@@ -1534,7 +1537,8 @@ function setZairaisen(){
   if(mb){
     mb.innerHTML='<button data-f="all" class="on" onclick="setZaiFilter(false)">JR＋私鉄</button>'+
       '<button data-f="jr" onclick="setZaiFilter(true)">JRのみ</button>'+
-      `<button data-f="shink" class="${zaiShinkOn?'on':''}" onclick="zaiToggleShink()">🚄新幹線</button>`;
+      `<button data-f="shink" class="${zaiShinkOn?'on':''}" onclick="zaiToggleShink()">🚄新幹線</button>`+
+      `<button data-f="hwy" class="${zaiHwyOn?'on':''}" onclick="zaiToggleHwy()">🛣️道路</button>`;
     mb.style.display='flex';
   }
   zaiJrOnly=false;
@@ -2240,6 +2244,7 @@ async function loadHighway(){
     setErr(null);
     hwyEvents=await fetchHwyEvents();
     applyHwyEvents();
+    if(hwyZaiOn) hwyDrawZai();
     if(!hwyEvents) setErr('交通情報の取得に失敗(経路のみ表示)');
   }catch(e){ setErr('高速道路データの取得失敗: '+(e&&e.message||e)); }
 }
@@ -2257,7 +2262,8 @@ function setHighway(){
   const mb=document.getElementById('modebar');
   if(mb){
     mb.innerHTML='<button data-f="hw" class="on" onclick="setHwyFilter(false)">高速のみ</button>'+
-      '<button data-f="all" onclick="setHwyFilter(true)">一般道も表示</button>';
+      '<button data-f="all" onclick="setHwyFilter(true)">一般道も表示</button>'+
+      `<button data-f="zai" class="${hwyZaiOn?'on':''}" onclick="hwyToggleZai()">🚆在来線</button>`;
     mb.style.display='flex';
   }
   hwyAll=false;
@@ -2268,6 +2274,87 @@ function setHighway(){
   loadHighway();
   if(hwyTimer)clearInterval(hwyTimer);
   hwyTimer=setInterval(async()=>{ const d=await fetchHwyEvents(); if(d){ hwyEvents=d; applyHwyEvents(); } }, 5*60*1000);
+}
+
+// ===== 在来線⇔高速道路の相互重ね書きオーバーレイ =====
+var zaiHwyOn=false, zaiHwySrc=null;   // 在来線モードに高速道路を重ねる
+var hwyZaiOn=false, hwyZaiSrc=null;   // 高速道路モードに在来線を重ねる
+async function zaiDrawHwy(){
+  try{
+    if(!hwyLines) hwyLines=await (await fetch('highway_lines.json')).json();
+    if(!hwyEvents) hwyEvents=await fetchHwyEvents();
+    if(!zaiHwySrc){ zaiHwySrc=new Cesium.CustomDataSource('zai-hwy'); viewer.dataSources.add(zaiHwySrc); }
+    zaiHwySrc.entities.removeAll();
+    zaiHwySrc.show=true;
+    const col=Cesium.Color.fromCssColorString('#66b2ff');
+    for(const ln of hwyLines.lines){
+      for(const seg of ln.coords){
+        if(seg.length<2) continue;
+        const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,1000); }
+        zaiHwySrc.entities.add({ name:ln.n,
+          description:`<div style="font-size:13px"><b>${shinkEsc(ln.n)}</b>(高速道路)</div>`,
+          polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:2,
+            material:col.withAlpha(0.7), depthFailMaterial:col.withAlpha(0.3), arcType:Cesium.ArcType.GEODESIC } });
+      }
+    }
+    for(const e of (hwyEvents&&hwyEvents.events)||[]){
+      if(!e.hw) continue;   // 重ね書きでは高速系の事象のみ
+      const kind=hwyKind(e);
+      const c2=Cesium.Color.fromCssColorString(HWY_COL[kind]||'#ffd23f');
+      const desc=`<div style="font-size:13px"><b>${shinkEsc(e.road||e.r||'')}</b> ${shinkEsc(e.d||'')}<br>`+
+        `<b style="color:${HWY_COL[kind]}">${HWY_LBL[kind]}</b> ${shinkEsc(e.c||'')} ${shinkEsc(e.rd||'')}<br>${shinkEsc(e.i||'')}・出典 JARTIC</div>`;
+      if(e.ln&&e.ln.length>1&&(kind==='jam'||kind==='slow'||kind==='closure')){
+        const pos=[]; for(const [lo,la] of e.ln){ pos.push(lo,la,1250); }
+        zaiHwySrc.entities.add({ name:HWY_LBL[kind], description:desc,
+          polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:4.5,
+            material:c2, depthFailMaterial:c2.withAlpha(0.5), arcType:Cesium.ArcType.GEODESIC } });
+      }
+      if(e.pt&&(kind==='closure'||kind==='acc'||kind==='brk')){
+        zaiHwySrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(e.pt[0],e.pt[1],1350),
+          name:HWY_LBL[kind], description:desc,
+          point:{ pixelSize:7, color:c2, outlineColor:Cesium.Color.BLACK, outlineWidth:1.5 } });
+      }
+    }
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }catch(_){}
+}
+function zaiToggleHwy(){
+  zaiHwyOn=!zaiHwyOn;
+  const b=document.querySelector('#modebar button[data-f="hwy"]');
+  if(b)b.classList.toggle('on', zaiHwyOn);
+  if(zaiHwyOn) zaiDrawHwy();
+  else if(zaiHwySrc){ zaiHwySrc.show=false; try{ viewer.scene.requestRender(); }catch(_){} }
+}
+async function hwyDrawZai(){
+  try{
+    if(!zaiData) zaiData=await (await fetch('rail_lines.json')).json();
+    if(!zaiStatus) zaiStatus=await fetchZaiStatus();
+    if(!hwyZaiSrc){ hwyZaiSrc=new Cesium.CustomDataSource('hwy-zai'); viewer.dataSources.add(hwyZaiSrc); }
+    hwyZaiSrc.entities.removeAll();
+    hwyZaiSrc.show=true;
+    for(const ln of zaiData.lines){
+      const s=zaiLineState(ln);
+      const col=Cesium.Color.fromCssColorString(
+        s.st==='nostat' ? '#8fd0ff' : (SHINK_COLOR[s.st]||SHINK_COLOR.unknown));
+      const alpha=ln.co?0.8:0.5;
+      for(const seg of ln.coords){
+        if(seg.length<2) continue;
+        const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,900); }
+        hwyZaiSrc.entities.add({ name:`${ln.n}（${ln.op}）`,
+          description:`<div style="font-size:13px"><b>${shinkEsc(ln.n)}</b>（${shinkEsc(ln.op)}）<br>状態: ${shinkEsc(s.text)}</div>`,
+          polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:ln.co?1.8:1.1,
+            material:col.withAlpha(alpha), depthFailMaterial:col.withAlpha(alpha*0.4), arcType:Cesium.ArcType.GEODESIC } });
+      }
+    }
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }catch(_){}
+}
+function hwyToggleZai(){
+  hwyZaiOn=!hwyZaiOn;
+  const b=document.querySelector('#modebar button[data-f="zai"]');
+  if(b)b.classList.toggle('on', hwyZaiOn);
+  if(hwyZaiOn) hwyDrawZai();
+  else if(hwyZaiSrc){ hwyZaiSrc.show=false; try{ viewer.scene.requestRender(); }catch(_){} }
 }
 
 // ===== 警報・注意報レイヤー(気象庁・新幹線モード内、2D shinkansen.htmlと同データ) =====
