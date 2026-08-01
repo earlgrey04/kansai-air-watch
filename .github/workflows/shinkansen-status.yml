@@ -31,12 +31,19 @@ jobs:
             "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/status/pressure_grid.json" \
             -o pressure_grid.json || true
           python3 scripts/fetch_pressure_grid.py || true
+      - name: fetch highway events (skip if fresh)
+        run: |
+          curl -sf --max-time 20 \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/status/highway_events.json" \
+            -o highway_events.json || true
+          python3 scripts/fetch_highway_events.py || true
       - name: push to status branch
         run: |
           mkdir -p /tmp/out && cp shinkansen_status.json /tmp/out/
           [ -s weather_warnings.json ] && cp weather_warnings.json /tmp/out/ || true
           [ -s zairaisen_status.json ] && cp zairaisen_status.json /tmp/out/ || true
           [ -s pressure_grid.json ] && cp pressure_grid.json /tmp/out/ || true
+          [ -s highway_events.json ] && cp highway_events.json /tmp/out/ || true
           cd /tmp/out
           git init -q -b status
           git config user.name "github-actions[bot]"

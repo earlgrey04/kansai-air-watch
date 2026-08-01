@@ -91,12 +91,12 @@
     margin-right:6px; vertical-align:middle; }
   #tsuLegend3 .hd { font-size:10.5px; color:#9fb8d6; }
   /* 在来線モードの運行情報一覧パネル */
-  #zaiPanel { display:none; position:absolute; right:10px; bottom:44px; z-index:10;
+  #zaiPanel, #hwyPanel { display:none; position:absolute; right:10px; bottom:44px; z-index:10;
     background:rgba(10,30,50,.88); color:#dfeaff; border:1px solid #29496b; border-radius:10px;
     padding:8px 12px; font:11px/1.55 system-ui,sans-serif; width:290px; }
-  #zaiPanel .hd { font-size:10.5px; color:#9fb8d6; }
-  #zaiPanel a { color:#8fc1ee; text-decoration:none; }
-  #zaiList { max-height:38vh; overflow-y:auto; margin:4px 0; }
+  #zaiPanel .hd, #hwyPanel .hd { font-size:10.5px; color:#9fb8d6; }
+  #zaiPanel a, #hwyPanel a { color:#8fc1ee; text-decoration:none; }
+  #zaiList, #hwyList { max-height:38vh; overflow-y:auto; margin:4px 0; }
   .zai-row { padding:3px 4px; border-radius:6px; cursor:pointer; }
   .zai-row:hover { background:rgba(255,255,255,.08); }
   .zai-row b { font-size:11.5px; }
@@ -112,8 +112,8 @@
       line-height: 1.5; padding: 5px 8px; }
     #tsuLegend3 { left: 6px; bottom: 300px; max-width: 44vw; font-size: 9.5px;
       line-height: 1.5; padding: 5px 8px; }
-    #zaiPanel { right: 6px; bottom: 96px; width: 54vw; font-size: 10px; padding: 6px 9px; }
-    #zaiList { max-height: 24vh; }
+    #zaiPanel, #hwyPanel { right: 6px; bottom: 96px; width: 54vw; font-size: 10px; padding: 6px 9px; }
+    #zaiList, #hwyList { max-height: 24vh; }
     #pressNote { left: 6px; bottom: 4px; font-size: 9px; max-width: 60vw; }
     #warnLegend3 .chip, #tsuLegend3 .chip, #shinkLegend .chip { width: 13px; }
     .cesium-viewer-animationContainer { transform: scale(0.6); transform-origin: bottom left; }
@@ -122,7 +122,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v55-mobile-tune</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v56-highway</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -140,6 +140,7 @@
   <button id="bFault" onclick="setFaults()">🗺️ 活断層</button>
   <button id="bShink" onclick="setShinkansen()">🚄 新幹線</button>
   <button id="bZai" onclick="setZairaisen()">🚆 在来線</button>
+  <button id="bHwy" onclick="setHighway()">🛣️ 高速道路</button>
   <button id="bTsu" onclick="toggleTsunami()">🌊 津波</button>
   <button id="bPress" onclick="togglePressure()">🌐 気圧</button>
   <button id="bTy" onclick="setTyphoon()">🌀 台風</button>
@@ -176,6 +177,12 @@
   <a href="https://www.jrkyushu.co.jp/trains/info/" target="_blank" rel="noopener">JR九州</a></span>
 </div>
 <div id="pressNote">気圧配置 読み込み中…</div>
+<div id="hwyPanel">
+  <span class="hd">🛣️ 道路交通情報 <span id="hwyUpd"></span></span>
+  <div id="hwyList"></div>
+  <span class="hd">⛔通行止 🔴渋滞 🟠混雑 🟡規制 ／ 行クリックで移動<br>
+  出典: <a href="https://www.jartic.or.jp/" target="_blank" rel="noopener">JARTIC(日本道路交通情報センター)</a>・経路 国土数値情報N06</span>
+</div>
 <div id="tsuLegend3">
   <span class="hd">津波情報(気象庁)</span><br>
   <span class="chip" style="background:#c800ff"></span>大津波警報<br>
@@ -411,6 +418,10 @@ function clearNewModes(){
   if(zaiSrc){ try{ viewer.dataSources.remove(zaiSrc,true); }catch(_){} zaiSrc=null; }
   if(zaiTimer){ try{ clearInterval(zaiTimer); }catch(_){} zaiTimer=null; }
   zaiSecEnts=[];
+  if(hwySrc){ try{ viewer.dataSources.remove(hwySrc,true); }catch(_){} hwySrc=null; }
+  if(hwyEvSrc){ try{ viewer.dataSources.remove(hwyEvSrc,true); }catch(_){} hwyEvSrc=null; }
+  if(hwyTimer){ try{ clearInterval(hwyTimer); }catch(_){} hwyTimer=null; }
+  { const hp=document.getElementById('hwyPanel'); if(hp) hp.style.display='none'; }
   if(zaiShinkSrc){ try{ viewer.dataSources.remove(zaiShinkSrc,true); }catch(_){} zaiShinkSrc=null; }
   { const zp=document.getElementById('zaiPanel'); if(zp) zp.style.display='none'; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
@@ -2104,6 +2115,159 @@ function setTyphoon(){
   loadTyphoon();
   if(tyTimer)clearInterval(tyTimer);
   tyTimer=setInterval(loadTyphoon, 10*60*1000);  // 現況・予報を10分毎に更新
+}
+
+// ===== 高速道路（経路=N06／渋滞・規制・事故=JARTIC、statusブランチ経由15〜20分毎） =====
+var hwySrc=null, hwyEvSrc=null, hwyTimer=null, hwyLines=null, hwyEvents=null, hwyAll=false;
+const HWY_STATUS_URLS=[
+  { url:'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/highway_events.json?ref=status',
+    opts:{ headers:{ 'Accept':'application/vnd.github.raw+json' } } },
+  { url:'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/highway_events.json', bust:true },
+  { url:'highway_events.json' },
+];
+const HWY_COL={ jam:'#ff2800', slow:'#ff9e00', closure:'#d40000', reg:'#ffd23f', acc:'#ff3b30', brk:'#ffd23f' };
+const HWY_LBL={ jam:'渋滞', slow:'混雑', closure:'通行止', reg:'規制', acc:'事故', brk:'故障車' };
+async function fetchHwyEvents(){
+  for(const s of HWY_STATUS_URLS){
+    try{
+      const u=s.bust ? s.url+'?t='+Date.now() : s.url;
+      const r=await fetch(u,{ cache:'no-store', ...(s.opts||{}) });
+      if(r.ok) return await r.json();
+    }catch(_){}
+  }
+  return null;
+}
+function hwyKind(e){
+  if(e.k==='reg' && /通行止/.test(e.rd||'')) return 'closure';
+  return e.k;
+}
+function applyHwyEvents(){
+  if(!hwyEvSrc) return;
+  hwyEvSrc.entities.removeAll();
+  const counts={};
+  const evs=(hwyEvents&&hwyEvents.events)||[];
+  for(const e of evs){
+    if(!hwyAll && !e.hw) continue;
+    const kind=hwyKind(e);
+    counts[kind]=(counts[kind]||0)+1;
+    const col=Cesium.Color.fromCssColorString(HWY_COL[kind]||'#ffd23f');
+    const desc=`<div style="font-size:13px"><b>${shinkEsc(e.road||e.r||'')}</b> ${shinkEsc(e.d||'')}<br>`+
+      `<b style="color:${HWY_COL[kind]}">${HWY_LBL[kind]}</b> ${shinkEsc(e.c||'')} ${shinkEsc(e.rd||'')}<br>`+
+      `${shinkEsc(e.i||'')}<br><span style="color:#889">出典 JARTIC</span></div>`;
+    if(e.ln && e.ln.length>1 && (kind==='jam'||kind==='slow'||kind==='closure')){
+      const pos=[]; for(const [lo,la] of e.ln){ pos.push(lo,la,1300); }
+      hwyEvSrc.entities.add({ name:`${HWY_LBL[kind]} ${e.road||''}`, description:desc,
+        polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos),
+          width:kind==='closure'?5:4.5, material:col,
+          depthFailMaterial:col.withAlpha(0.5), arcType:Cesium.ArcType.GEODESIC } });
+    }
+    if(e.pt && (kind==='closure'||kind==='acc'||kind==='brk'||kind==='reg')){
+      hwyEvSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(e.pt[0],e.pt[1],1400),
+        name:`${HWY_LBL[kind]} ${e.road||''}`, description:desc,
+        point:{ pixelSize:kind==='reg'?5:8, color:col, outlineColor:Cesium.Color.BLACK, outlineWidth:1.5,
+          distanceDisplayCondition:kind==='reg'?new Cesium.DistanceDisplayCondition(0,1.6e6):undefined },
+        label:(kind==='closure'||kind==='acc')?{ text:HWY_LBL[kind], font:'bold 11px sans-serif',
+          fillColor:Cesium.Color.WHITE, outlineColor:Cesium.Color.BLACK, outlineWidth:3,
+          style:Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset:new Cesium.Cartesian2(0,-14),
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,1.2e6) }:undefined });
+    }
+  }
+  // HUD・パネル
+  const upd=document.getElementById('upd');
+  const ts=hwyEvents&&hwyEvents.fetchedAt? hwyEvents.fetchedAt.slice(11,16):'--:--';
+  const parts=[];
+  for(const k of ['closure','acc','brk','jam','slow','reg']){
+    if(counts[k]) parts.push(`${HWY_LBL[k]} ${counts[k]}`);
+  }
+  upd.textContent=`道路交通情報 ${ts}時点 ─ ${parts.join(' / ')||'表示対象の事象なし'}`+
+    `（${hwyAll?'高速＋一般道':'高速・有料道路系のみ'}・線/点クリックで詳細・一覧は右下）・出典 JARTIC／経路 国土数値情報N06-24`;
+  const list=document.getElementById('hwyList');
+  const updEl=document.getElementById('hwyUpd');
+  if(updEl) updEl.textContent=ts+'時点';
+  if(list){
+    const dot={ closure:'⛔', acc:'💥', brk:'🚗', jam:'🔴', slow:'🟠', reg:'🟡' };
+    const rows=evs.filter(e=>(hwyAll||e.hw))
+      .map(e=>({e, kind:hwyKind(e)}))
+      .filter(x=>x.kind!=='slow'&&x.kind!=='reg'||x.e.hw)  // 一覧は高速の軽微規制まで
+      .sort((a,b)=>{ const o={closure:0,acc:1,brk:2,jam:3,slow:4,reg:5}; return (o[a.kind]||9)-(o[b.kind]||9); })
+      .slice(0,80);
+    list.innerHTML=rows.length? rows.map(({e,kind})=>
+      `<div class="zai-row" onclick="hwyZoom(${e.pt?e.pt[0]:135},${e.pt?e.pt[1]:35})">`+
+      `${dot[kind]||'⚪'} <b>${shinkEsc((e.road||e.r||'').slice(0,18))}</b> <span class="hd">${shinkEsc(e.d||'')}</span>`+
+      `<div class="tx">${shinkEsc([HWY_LBL[kind],e.c,e.rd,e.i].filter(Boolean).join('・').slice(0,80))}</div></div>`).join('')
+      : '<div class="zai-row"><span class="tx">現在、表示対象の事象はありません。</span></div>';
+  }
+  try{ viewer.scene.requestRender(); }catch(_){}
+}
+function hwyZoom(lo,la){
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(lo,la,60000),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-80),roll:0}, duration:1.2 });
+}
+function setHwyFilter(all){
+  hwyAll=all;
+  document.querySelectorAll('#modebar button').forEach(b=>b.classList.toggle('on',(b.dataset.f==='all')===all));
+  applyHwyEvents();
+}
+async function loadHighway(){
+  try{
+    if(!hwyLines) hwyLines=await (await fetch('highway_lines.json')).json();
+    const src=new Cesium.CustomDataSource('highway');
+    const col=Cesium.Color.fromCssColorString('#66b2ff');
+    for(const ln of hwyLines.lines){
+      for(const seg of ln.coords){
+        if(seg.length<2) continue;
+        const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,1100); }
+        src.entities.add({ name:ln.n,
+          description:`<div style="font-size:13px"><b>${shinkEsc(ln.n)}</b><br><span style="color:#889">経路 国土数値情報N06-24</span></div>`,
+          polyline:{ positions:Cesium.Cartesian3.fromDegreesArrayHeights(pos), width:2.2,
+            material:col.withAlpha(0.85), depthFailMaterial:col.withAlpha(0.35), arcType:Cesium.ArcType.GEODESIC } });
+      }
+    }
+    for(const ic of hwyLines.ics||[]){
+      if(!/ＪＣＴ|JCT/.test(ic.n)) continue;   // ラベルはJCTのみ(クラッタ抑制)
+      src.entities.add({ position:Cesium.Cartesian3.fromDegrees(ic.c[0],ic.c[1],1200),
+        point:{ pixelSize:3, color:Cesium.Color.fromCssColorString('#bcd9ff'),
+          outlineColor:Cesium.Color.BLACK, outlineWidth:1,
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,9e5) },
+        label:{ text:ic.n, font:'10px sans-serif', fillColor:Cesium.Color.WHITE,
+          outlineColor:Cesium.Color.BLACK, outlineWidth:2, style:Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset:new Cesium.Cartesian2(0,-10),
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,3.5e5) } });
+    }
+    hwySrc=src; viewer.dataSources.add(src);
+    if(!hwyEvSrc){ hwyEvSrc=new Cesium.CustomDataSource('highway-ev'); viewer.dataSources.add(hwyEvSrc); }
+    document.getElementById('cnt').textContent=`${hwyLines.lines.length} 路線`;
+    setErr(null);
+    hwyEvents=await fetchHwyEvents();
+    applyHwyEvents();
+    if(!hwyEvents) setErr('交通情報の取得に失敗(経路のみ表示)');
+  }catch(e){ setErr('高速道路データの取得失敗: '+(e&&e.message||e)); }
+}
+function setHighway(){
+  { const btn=document.getElementById('bHwy');   // 2度押しでOFF
+    if(btn && btn.classList.contains('on')){ setLive(); return; } }
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto='esri'; refreshPhotoButtons();
+  const btn=document.getElementById('bHwy'); if(btn)btn.classList.add('on');
+  setModeLbl('高速道路'); clearStarlink(); setBasemap('dark');
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  const mb=document.getElementById('modebar');
+  if(mb){
+    mb.innerHTML='<button data-f="hw" class="on" onclick="setHwyFilter(false)">高速のみ</button>'+
+      '<button data-f="all" onclick="setHwyFilter(true)">一般道も表示</button>';
+    mb.style.display='flex';
+  }
+  hwyAll=false;
+  { const hp=document.getElementById('hwyPanel'); if(hp) hp.style.display='block'; }
+  setErr('高速道路データを読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(136.5,32.2,2.45e6),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-78),roll:0}, duration:1.5 });
+  loadHighway();
+  if(hwyTimer)clearInterval(hwyTimer);
+  hwyTimer=setInterval(async()=>{ const d=await fetchHwyEvents(); if(d){ hwyEvents=d; applyHwyEvents(); } }, 5*60*1000);
 }
 
 // ===== 警報・注意報レイヤー(気象庁・新幹線モード内、2D shinkansen.htmlと同データ) =====
