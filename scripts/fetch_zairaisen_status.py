@@ -225,18 +225,90 @@ def jr_shikoku(lines):
         put(lines, 'jrs:' + norm(ln), classify(body), f'{ln}: 運行情報あり(JR四国サイト参照)')
 
 
-def private_rti(lines):
-    """鉄道遅延情報のjson(取得できる環境でのみ)。掲載=遅延あり"""
-    d = json.loads(fetch('https://tetsudo.rti-giken.jp/free/delay.json', timeout=10))
-    for e in d:
-        name = e.get('name') or ''
-        comp = e.get('company') or ''
-        if not name:
-            continue
-        if re.search(r'^JR|旅客鉄道', comp):
-            continue  # JRは各社ソースで把握済み
-        put(lines, 'pvt:' + norm(name), 'delay', f'{comp}{name}: 遅延情報あり')
-    return True
+PVT_SOURCES = [
+    # key, 表示名, URL, タイプ, 平常判定regex, エンコーディング
+    dict(key='hankyu', name='阪急電鉄',
+         url='https://www.hankyu.co.jp/railinfo/include/page_railinfo.html',
+         typ='html', normal=r'平常(?:通り|どおり)|遅れはございません|情報はありません'),
+    dict(key='hanshin', name='阪神電気鉄道', url='https://rail.hanshin.co.jp/unkou/',
+         typ='html', normal=r'遅れはございません'),
+    dict(key='kintetsu', name='近畿日本鉄道', url='https://www.kintetsu.jp/unkou/unkou.html',
+         typ='html', enc='cp932', normal=r'遅れはございません'),
+    dict(key='nankai', name='南海電気鉄道',
+         url='https://www.nankai.co.jp/api/v1/nocache/emergency_news', typ='nankai'),
+    dict(key='osakametro', name='大阪メトロ',
+         url='https://subway.osakametro.co.jp/guide/subway_information.php', typ='osakametro'),
+    dict(key='keio', name='京王電鉄', url='https://www.keio.co.jp/unkou/unkou_pc.html',
+         typ='html', normal=r'平常通り運転'),
+    dict(key='keikyu', name='京浜急行電鉄', url='https://unkou.keikyu.co.jp/',
+         typ='html', normal=r'平常通り運転'),
+    dict(key='keisei', name='京成電鉄', url='https://www.keisei.co.jp/traininfo/index.php',
+         typ='html', normal=r'平常(?:運行|どおり)'),
+    dict(key='meitetsu', name='名古屋鉄道', url='https://top.meitetsu.co.jp/em/',
+         typ='html', normal=r'遅れはございません'),
+]
+OSAKA_METRO_LINES = ['御堂筋線', '谷町線', '四つ橋線', '中央線', '千日前線', '堺筋線',
+                     '長堀鶴見緑地線', '今里筋線', '南港ポートタウン線']
+
+
+def _strip_html(t):
+    t = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', t, flags=re.S)
+    t = re.sub(r'<[^>]+>', ' ', t)
+    return re.sub(r'[\s\u3000]+', ' ', t)
+
+
+def private_official(lines):
+    """大手私鉄9社の公式運行情報を取得。会社単位＋可能なら路線単位で反映"""
+    got = 0
+    for src in PVT_SOURCES:
+        try:
+            raw = fetch(src['url'], timeout=15)
+            if src['typ'] == 'nankai':
+                items = json.loads(raw)
+                if not items:
+                    put(lines, f"pvtco:{src['key']}", 'normal', f"{src['name']}: 平常運転")
+                else:
+                    blob = ' '.join(str(i.get('title', '') or '') + str(i.get('body', '') or '')
+                                    for i in items)[:300]
+                    put(lines, f"pvtco:{src['key']}", classify(blob), f"{src['name']}: {blob[:160]}")
+                got += 1
+                continue
+            enc = src.get('enc', 'utf-8')
+            body = _strip_html(raw.decode(enc, errors='replace'))
+            if src['typ'] == 'osakametro':
+                worst = 'normal'
+                texts = []
+                for ln in OSAKA_METRO_LINES:
+                    m = re.search(re.escape(ln) + r'.{0,120}?([◯○△×])', body)
+                    if not m:
+                        continue
+                    st = {'◯': 'normal', '○': 'normal', '△': 'delay', '×': 'suspend'}[m.group(1)]
+                    if st != 'normal':
+                        put(lines, f"pvt:{src['key']}:{norm(ln)}", st,
+                            f"大阪メトロ{ln}: " + ('遅延など' if st == 'delay' else '運転見合わせ'))
+                        texts.append(f'{ln}={m.group(1)}')
+                        if SEVERITY[st] > SEVERITY[worst]:
+                            worst = st
+                put(lines, f"pvtco:{src['key']}", worst,
+                    f"{src['name']}: " + ('全線通常運行' if worst == 'normal' else ' '.join(texts)))
+                got += 1
+                continue
+            # 汎用HTML: 平常マーカー or 異常本文
+            if re.search(src['normal'], body):
+                put(lines, f"pvtco:{src['key']}", 'normal', f"{src['name']}: 平常運転")
+            else:
+                m = re.search(r'.{0,60}(?:見合わせ|遅れ|遅延|運休|直通運転を中止).{0,120}', body)
+                blob = (m.group(0).strip() if m else '運行情報あり(公式サイト参照)')[:180]
+                st = classify(blob)
+                put(lines, f"pvtco:{src['key']}", st, f"{src['name']}: {blob}")
+                for lnm in set(re.findall(r'([一-龥ぁ-んァ-ヶー]{1,7}線)', blob)):
+                    put(lines, f"pvt:{src['key']}:{norm(lnm)}", st, f"{src['name']}{lnm}: {blob[:120]}")
+            got += 1
+        except Exception:
+            pass
+    if not got:
+        raise RuntimeError('全社取得失敗')
+    return got
 
 
 def main():
@@ -251,8 +323,9 @@ def main():
         except Exception as e:
             errors.append(f'{co}: {type(e).__name__}: {e}')
     try:
-        private_rti(lines)
+        n = private_official(lines)
         ok.append('pvt')
+        ok.append(f'pvt{n}')
     except Exception as e:
         errors.append(f'pvt: {type(e).__name__}: {e}')
 

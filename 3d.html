@@ -122,7 +122,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v57-cross-overlay</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v58-pvt-status</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -167,7 +167,7 @@
 <div id="zaiPanel">
   <span class="hd">🚆 在来線 運行情報 <span id="zaiUpd"></span></span>
   <div id="zaiList"></div>
-  <span class="hd">🟢平常 🟡お知らせ 🟠遅れ 🔴見合わせ・運休 🩵私鉄など(情報対象外) ／ 行クリックで路線へ移動<br>
+  <span class="hd">🟢平常 🟡お知らせ 🟠遅れ 🔴見合わせ・運休 🩵情報対象外の私鉄 ／ 阪急・阪神・近鉄・南海・大阪メトロ・京王・京急・京成・名鉄は公式情報を反映 ／ 行クリックで移動<br>
   公式:
   <a href="https://www3.jrhokkaido.co.jp/webunkou/" target="_blank" rel="noopener">JR北</a>・
   <a href="https://traininfo.jreast.co.jp/train_info/" target="_blank" rel="noopener">JR東</a>・
@@ -1313,7 +1313,8 @@ function renderZaiPanel(){
   const updEl=document.getElementById('zaiUpd');
   if(!list) return;
   if(updEl) updEl.textContent=zaiStatus&&zaiStatus.updated? zaiStatus.updated.slice(11,16)+'時点':'';
-  const entries=Object.entries((zaiStatus&&zaiStatus.lines)||{});
+  const entries=Object.entries((zaiStatus&&zaiStatus.lines)||{})
+    .filter(([k,v])=>v.st!=='normal');
   const sev={ suspend:3, delay:2, info:1 };
   entries.sort((a,b)=>(sev[b[1].st]||0)-(sev[a[1].st]||0));
   if(!entries.length){
@@ -1322,10 +1323,13 @@ function renderZaiPanel(){
   }
   const dot={ suspend:'🔴', delay:'🟠', info:'🟡' };
   list.innerHTML=entries.map(([key,v])=>{
-    const co=key.split(':')[0];
-    const nm=key.split(':').slice(1).join(':');
+    const parts=key.split(':');
+    let co=parts[0], nm=parts.slice(1).join(':');
+    if(co==='pvtco'){ nm=ZAI_PVT_LBL[parts[1]]||parts[1]; co='私鉄'; }
+    else if(co==='pvt'&&parts.length>=3){ nm=parts.slice(2).join(':'); co=ZAI_PVT_LBL[parts[1]]||'私鉄'; }
+    else co=ZAI_CO_LBL[co]||co;
     return `<div class="zai-row" onclick="zaiZoomTo('${key}')">`+
-      `${dot[v.st]||'⚪'} <b>${shinkEsc(nm)}</b> <span class="hd">〔${ZAI_CO_LBL[co]||co}〕</span>`+
+      `${dot[v.st]||'⚪'} <b>${shinkEsc(nm)}</b> <span class="hd">〔${shinkEsc(co)}〕</span>`+
       `<div class="tx">${shinkEsc(v.text||'')}</div></div>`;
   }).join('');
 }
@@ -1407,13 +1411,34 @@ function zaiSectionPath(ln, A, B){
   }
   return null;
 }
+const ZAI_PVT_OPS={ '阪急電鉄':'hankyu','阪神電気鉄道':'hanshin','近畿日本鉄道':'kintetsu',
+  '南海電気鉄道':'nankai','大阪市高速電気軌道':'osakametro','京王電鉄':'keio',
+  '京浜急行電鉄':'keikyu','京成電鉄':'keisei','名古屋鉄道':'meitetsu' };
+const ZAI_PVT_LBL={ hankyu:'阪急',hanshin:'阪神',kintetsu:'近鉄',nankai:'南海',
+  osakametro:'大阪メトロ',keio:'京王',keikyu:'京急',keisei:'京成',meitetsu:'名鉄' };
 function zaiLineState(ln){
-  const key=(ln.co?ln.co:'pvt')+':'+zaiNorm(ln.n);
-  const ent=zaiStatus&&zaiStatus.lines&&zaiStatus.lines[key];
-  if(ent) return { st:ent.st, text:ent.text };
-  const ok=zaiStatus&&zaiStatus.ok||[];
-  if(ln.co) return ok.includes(ln.co)? { st:'normal', text:'平常運転' } : { st:'unknown', text:'情報取得失敗' };
-  return ok.includes('pvt')? { st:'normal', text:'遅延情報なし(主要線のみ・目安)' } : { st:'nostat', text:'運行情報の取得対象外' };
+  const L=zaiStatus&&zaiStatus.lines;
+  if(ln.co){
+    const ent=L&&L[ln.co+':'+zaiNorm(ln.n)];
+    if(ent) return { st:ent.st, text:ent.text };
+    const ok=zaiStatus&&zaiStatus.ok||[];
+    return ok.includes(ln.co)? { st:'normal', text:'平常運転' } : { st:'unknown', text:'情報取得失敗' };
+  }
+  // 私鉄: 対応9社は会社/路線単位、それ以外は対象外(水色)
+  const k=ZAI_PVT_OPS[ln.op];
+  if(k&&L){
+    // 路線名の候補: そのまま / 括弧内(例 1号線(御堂筋線)) / 先頭の◯号線を除去(例 3号線銀座線)
+    const cands=[zaiNorm(ln.n)];
+    const pm=ln.n.match(/[（(]([^）)]+)[）)]/); if(pm) cands.push(zaiNorm(pm[1]));
+    const stripped=zaiNorm(ln.n).replace(/^\d+号線/,''); if(stripped&&stripped!==cands[0]) cands.push(stripped);
+    for(const c of cands){
+      const ent=L['pvt:'+k+':'+c];
+      if(ent) return { st:ent.st, text:ent.text };
+    }
+    const co=L['pvtco:'+k];
+    if(co) return { st:co.st, text:co.text };
+  }
+  return { st:'nostat', text:'運行情報の取得対象外' };
 }
 function applyZaiStatus(){
   if(!zaiSrc||!zaiData) return;
@@ -1475,7 +1500,7 @@ function applyZaiStatus(){
   if(counts.delay) parts.push(`遅れ ${counts.delay}`);
   if(counts.info) parts.push(`お知らせ ${counts.info}`);
   upd.textContent=`在来線 運行状況 ${ts}時点 ─ ${parts.length?parts.join(' / ')+'路線':'JR全線平常運転'}`+
-    '（JR=状態色・水色=私鉄など(運行情報対象外)・一覧は右下パネル・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
+    '（JR=状態色・水色=情報対象外の私鉄(大手9社は状態色)・一覧は右下パネル・線クリックで詳細）・経路 国土数値情報N02-24／運行情報 JR各社(目安)';
   renderZaiPanel();
   try{ viewer.scene.requestRender(); }catch(_){}
 }
@@ -1491,11 +1516,15 @@ async function loadZairaisen(){
       const key=(ln.co?ln.co:'pvt')+':'+zaiNorm(ln.n);
       let b=zaiKeyBounds[key];
       if(!b){ b=zaiKeyBounds[key]={ minLo:999, maxLo:-999, minLa:999, maxLa:-999 }; }
+      const pk=!ln.co&&ZAI_PVT_OPS[ln.op]? 'pvtco:'+ZAI_PVT_OPS[ln.op] : null;
+      let b2=pk? (zaiKeyBounds[pk]=zaiKeyBounds[pk]||{ minLo:999, maxLo:-999, minLa:999, maxLa:-999 }) : null;
       for(const seg of ln.coords){
         if(seg.length<2) continue;
         for(const [lo,la] of seg){
           if(lo<b.minLo)b.minLo=lo; if(lo>b.maxLo)b.maxLo=lo;
           if(la<b.minLa)b.minLa=la; if(la>b.maxLa)b.maxLa=la;
+          if(b2){ if(lo<b2.minLo)b2.minLo=lo; if(lo>b2.maxLo)b2.maxLo=lo;
+            if(la<b2.minLa)b2.minLa=la; if(la>b2.maxLa)b2.maxLa=la; }
         }
         const pos=[]; for(const [lo,la] of seg){ pos.push(lo,la,1200); }
         const e=src.entities.add({ name:`${ln.n}（${ln.op}）`,
