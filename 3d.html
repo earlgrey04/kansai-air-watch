@@ -122,7 +122,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v58-pvt-status</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v59-orbis</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -181,7 +181,7 @@
   <span class="hd">🛣️ 道路交通情報 <span id="hwyUpd"></span></span>
   <div id="hwyList"></div>
   <span class="hd">⛔通行止 🔴渋滞 🟠混雑 🟡規制 ／ 行クリックで移動<br>
-  出典: <a href="https://www.jartic.or.jp/" target="_blank" rel="noopener">JARTIC(日本道路交通情報センター)</a>・経路 国土数値情報N06</span>
+  出典: <a href="https://www.jartic.or.jp/" target="_blank" rel="noopener">JARTIC(日本道路交通情報センター)</a>・経路 国土数値情報N06・オービス © OpenStreetMap contributors</span>
 </div>
 <div id="tsuLegend3">
   <span class="hd">津波情報(気象庁)</span><br>
@@ -422,6 +422,7 @@ function clearNewModes(){
   if(zaiHwySrc){ try{ viewer.dataSources.remove(zaiHwySrc,true); }catch(_){} zaiHwySrc=null; }
   if(hwyZaiSrc){ try{ viewer.dataSources.remove(hwyZaiSrc,true); }catch(_){} hwyZaiSrc=null; }
   if(hwyEvSrc){ try{ viewer.dataSources.remove(hwyEvSrc,true); }catch(_){} hwyEvSrc=null; }
+  if(hwyOrbisSrc){ try{ viewer.dataSources.remove(hwyOrbisSrc,true); }catch(_){} hwyOrbisSrc=null; }
   if(hwyTimer){ try{ clearInterval(hwyTimer); }catch(_){} hwyTimer=null; }
   { const hp=document.getElementById('hwyPanel'); if(hp) hp.style.display='none'; }
   if(zaiShinkSrc){ try{ viewer.dataSources.remove(zaiShinkSrc,true); }catch(_){} zaiShinkSrc=null; }
@@ -2152,6 +2153,7 @@ function setTyphoon(){
 
 // ===== 高速道路（経路=N06／渋滞・規制・事故=JARTIC、statusブランチ経由15〜20分毎） =====
 var hwySrc=null, hwyEvSrc=null, hwyTimer=null, hwyLines=null, hwyEvents=null, hwyAll=false;
+var hwyOrbisOn=false, hwyOrbisSrc=null, hwyOrbisData=null;
 const HWY_STATUS_URLS=[
   { url:'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/highway_events.json?ref=status',
     opts:{ headers:{ 'Accept':'application/vnd.github.raw+json' } } },
@@ -2169,6 +2171,42 @@ async function fetchHwyEvents(){
     }catch(_){}
   }
   return null;
+}
+async function hwyDrawOrbis(){
+  try{
+    if(!hwyOrbisData) hwyOrbisData=await (await fetch('orbis.json')).json();
+    if(!hwyOrbisSrc){ hwyOrbisSrc=new Cesium.CustomDataSource('hwy-orbis'); viewer.dataSources.add(hwyOrbisSrc); }
+    hwyOrbisSrc.entities.removeAll();
+    hwyOrbisSrc.show=true;
+    let n=0;
+    for(const p of hwyOrbisData.pts){
+      if(!hwyAll && !p.hw) continue;
+      n++;
+      const info=[p.rd, p.sp?('制限 '+p.sp+'km/h'):'', p.dir?('向き '+p.dir+'\u00b0'):''].filter(Boolean).join('\u30fb');
+      hwyOrbisSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(p.c[0],p.c[1],1500),
+        name:'\u30aa\u30fc\u30d3\u30b9(\u901f\u5ea6\u53d6\u7de0\u88c5\u7f6e)',
+        description:'<div style="font-size:13px"><b>\ud83d\udcf8 \u30aa\u30fc\u30d3\u30b9(\u901f\u5ea6\u53d6\u7de0\u88c5\u7f6e)</b><br>'+shinkEsc(info||'\u8a73\u7d30\u60c5\u5831\u306a\u3057')+'<br>'+
+          '<span style="color:#889">\u4f4d\u7f6e\u306f\u76ee\u5b89\u3002\u51fa\u5178 \u00a9 OpenStreetMap contributors (ODbL)</span></div>',
+        point:{ pixelSize:6, color:Cesium.Color.fromCssColorString('#c084fc'),
+          outlineColor:Cesium.Color.BLACK, outlineWidth:1.5,
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,2.2e6) },
+        label:{ text:'\ud83d\udcf8', font:'14px sans-serif',
+          pixelOffset:new Cesium.Cartesian2(0,-14),
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,4.5e5) } });
+    }
+    const c=document.getElementById('cnt');
+    if(c&&hwyOrbisOn) c.textContent=(hwyLines?hwyLines.lines.length:'-')+' \u8def\u7dda\uff0f\ud83d\udcf8'+n;
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }catch(_){}
+}
+function hwyToggleOrbis(){
+  hwyOrbisOn=!hwyOrbisOn;
+  const b=document.querySelector('#modebar button[data-f="orbis"]');
+  if(b)b.classList.toggle('on', hwyOrbisOn);
+  if(hwyOrbisOn) hwyDrawOrbis();
+  else if(hwyOrbisSrc){ hwyOrbisSrc.show=false;
+    const c=document.getElementById('cnt'); if(c&&hwyLines) c.textContent=hwyLines.lines.length+' \u8def\u7dda';
+    try{ viewer.scene.requestRender(); }catch(_){} }
 }
 function hwyKind(e){
   if(e.k==='reg' && /通行止/.test(e.rd||'')) return 'closure';
@@ -2238,8 +2276,11 @@ function hwyZoom(lo,la){
 }
 function setHwyFilter(all){
   hwyAll=all;
-  document.querySelectorAll('#modebar button').forEach(b=>b.classList.toggle('on',(b.dataset.f==='all')===all));
+  document.querySelectorAll('#modebar button').forEach(b=>{
+    if(b.dataset.f==='hw'||b.dataset.f==='all') b.classList.toggle('on',(b.dataset.f==='all')===all);
+  });
   applyHwyEvents();
+  if(hwyOrbisOn) hwyDrawOrbis();
 }
 async function loadHighway(){
   try{
@@ -2274,6 +2315,7 @@ async function loadHighway(){
     hwyEvents=await fetchHwyEvents();
     applyHwyEvents();
     if(hwyZaiOn) hwyDrawZai();
+    if(hwyOrbisOn) hwyDrawOrbis();
     if(!hwyEvents) setErr('交通情報の取得に失敗(経路のみ表示)');
   }catch(e){ setErr('高速道路データの取得失敗: '+(e&&e.message||e)); }
 }
@@ -2292,6 +2334,7 @@ function setHighway(){
   if(mb){
     mb.innerHTML='<button data-f="hw" class="on" onclick="setHwyFilter(false)">高速のみ</button>'+
       '<button data-f="all" onclick="setHwyFilter(true)">一般道も表示</button>'+
+      `<button data-f="orbis" class="${hwyOrbisOn?'on':''}" onclick="hwyToggleOrbis()">📸オービス</button>`+
       `<button data-f="zai" class="${hwyZaiOn?'on':''}" onclick="hwyToggleZai()">🚆在来線</button>`;
     mb.style.display='flex';
   }
