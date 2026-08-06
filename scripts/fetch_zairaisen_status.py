@@ -7,6 +7,7 @@
 st: info/delay/suspend のみ記録(平常の路線は載せない。会社がokなら未記載=平常)
 """
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -311,6 +312,51 @@ def private_official(lines):
     return got
 
 
+
+# ===== ODPT(公共交通オープンデータセンター) 運行情報 =====
+# 無料トークンで取得可: 東京メトロ/都営/横浜市営/りんかい線/TX/多摩モノレール。
+# 追加事業者(東急・東武等)はODPT側で利用申請が通れば自動的に取り込まれる。
+ODPT_OP_KEY = {
+    'TokyoMetro': ('tokyometro', '東京メトロ'), 'Toei': ('toei', '都営交通'),
+    'YokohamaMunicipal': ('yokohama', '横浜市営地下鉄'), 'TWR': ('twr', 'りんかい線'),
+    'MIR': ('mir', 'つくばエクスプレス'), 'TamaMonorail': ('tamamono', '多摩モノレール'),
+    'Tokyu': ('tokyu', '東急電鉄'), 'Tobu': ('tobu', '東武鉄道'), 'Seibu': ('seibu', '西武鉄道'),
+    'Odakyu': ('odakyu', '小田急電鉄'), 'Sotetsu': ('sotetsu', '相模鉄道'),
+}
+ODPT_RAILWAY_JA = {"Keikyu.Airport": "空港線", "Keikyu.Kurihama": "久里浜線", "Keikyu.Main": "京急本線", "Keikyu.Zushi": "逗子線", "Keio.Dobutsuen": "動物園線", "Keio.Inokashira": "井の頭線", "Keio.Keibajo": "競馬場線", "Keio.Keio": "京王線", "Keio.KeioNew": "京王新線", "Keio.Sagamihara": "相模原線", "Keio.Takao": "高尾線", "MIR.TsukubaExpress": "つくばエクスプレス", "Odakyu.Enoshima": "江ノ島線", "Odakyu.Odawara": "小田原線", "Odakyu.Tama": "多摩線", "Seibu.Haijima": "拝島線", "Seibu.Ikebukuro": "池袋線", "Seibu.Sayama": "狭山線", "Seibu.SeibuChichibu": "西武秩父線", "Seibu.SeibuYurakucho": "西武有楽町線", "Seibu.Shinjuku": "新宿線", "Seibu.Toshima": "豊島線", "Sotetsu.Izumino": "いずみ野線", "Sotetsu.Main": "相鉄本線", "Sotetsu.SotetsuShinYokohama": "相鉄新横浜線", "TWR.Rinkai": "りんかい線", "TamaMonorail.TamaMonorail": "多摩モノレール", "Tobu.Isesaki": "伊勢崎線", "Tobu.Nikko": "日光線", "Tobu.TobuSkytree": "東武スカイツリーライン", "Tobu.TobuSkytreeBranch": "東武スカイツリーライン(押上-曳舟)", "Tobu.TobuUrbanPark": "東武アーバンパークライン", "Tobu.Tojo": "東上線", "Toei.Arakawa": "東京さくらトラム（都電荒川線）", "Toei.Asakusa": "浅草線", "Toei.Mita": "三田線", "Toei.NipporiToneri": "日暮里・舎人ライナー", "Toei.Oedo": "大江戸線", "Toei.Shinjuku": "新宿線", "TokyoMetro.Chiyoda": "千代田線", "TokyoMetro.Fukutoshin": "副都心線", "TokyoMetro.Ginza": "銀座線", "TokyoMetro.Hanzomon": "半蔵門線", "TokyoMetro.Hibiya": "日比谷線", "TokyoMetro.Marunouchi": "丸ノ内線", "TokyoMetro.MarunouchiBranch": "丸ノ内線支線", "TokyoMetro.Namboku": "南北線", "TokyoMetro.Tozai": "東西線", "TokyoMetro.Yurakucho": "有楽町線", "Tokyu.DenEnToshi": "田園都市線", "Tokyu.Ikegami": "池上線", "Tokyu.Meguro": "目黒線", "Tokyu.Oimachi": "大井町線", "Tokyu.TokyuShinYokohama": "東急新横浜線", "Tokyu.Toyoko": "東横線", "YokohamaMunicipal.Blue": "ブルーライン", "YokohamaMunicipal.Green": "グリーンライン"}
+
+
+def odpt_private(lines):
+    """ODPTのTrainInformation(全事業者一括1リクエスト)を路線単位で反映"""
+    token = os.environ.get('ODPT_TOKEN', '')
+    if not token:
+        return 0
+    raw = fetch('https://api.odpt.org/api/v4/odpt:TrainInformation'
+                f'?acl:consumerKey={token}', timeout=20)
+    data = json.loads(raw)
+    per_co = {}
+    for e in data:
+        op = (e.get('odpt:operator') or '').split(':')[-1]
+        km = ODPT_OP_KEY.get(op)
+        if not km:
+            continue
+        key, disp = km
+        rid = (e.get('odpt:railway') or '').replace('odpt.Railway:', '')
+        ja = ODPT_RAILWAY_JA.get(rid, rid.split('.')[-1])
+        text = ((e.get('odpt:trainInformationText') or {}).get('ja') or '').strip()
+        st = 'normal' if (not text or re.search(r'平常|ありません|通常どおり|通常運転', text)) else classify(text)
+        cur = per_co.setdefault(key, {'disp': disp, 'worst': 'normal', 'texts': []})
+        if st != 'normal':
+            put(lines, f'pvt:{key}:{norm(ja)}', st, f'{disp}{ja}: {text[:150]}')
+            cur['texts'].append(f'{ja}: {text[:80]}')
+            if SEVERITY[st] > SEVERITY[cur['worst']]:
+                cur['worst'] = st
+    for key, v in per_co.items():
+        put(lines, f'pvtco:{key}', v['worst'],
+            f"{v['disp']}: " + (' / '.join(v['texts'])[:180] if v['texts'] else '平常運転'))
+    return len(per_co)
+
+
 def main():
     lines = {}
     ok = []
@@ -328,6 +374,12 @@ def main():
         ok.append(f'pvt{n}')
     except Exception as e:
         errors.append(f'pvt: {type(e).__name__}: {e}')
+    try:
+        n2 = odpt_private(lines)
+        if n2:
+            ok.append(f'odpt{n2}')
+    except Exception as e:
+        errors.append(f'odpt: {type(e).__name__}: {e}')
 
     out = {'updated': datetime.now(JST).isoformat(timespec='seconds'),
            'ok': ok, 'lines': lines, 'errors': errors}

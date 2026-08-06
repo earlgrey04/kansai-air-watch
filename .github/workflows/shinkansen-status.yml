@@ -25,6 +25,8 @@ jobs:
         run: python3 scripts/fetch_weather_warnings.py || true
       - name: fetch zairaisen status
         run: python3 scripts/fetch_zairaisen_status.py || true
+        env:
+          ODPT_TOKEN: ${{ secrets.ODPT_TOKEN }}
       - name: fetch pressure grid (hourly, skip if fresh)
         run: |
           curl -sf --max-time 20 \

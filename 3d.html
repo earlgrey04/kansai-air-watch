@@ -122,7 +122,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v59-orbis</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v60-odpt</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -167,7 +167,7 @@
 <div id="zaiPanel">
   <span class="hd">🚆 在来線 運行情報 <span id="zaiUpd"></span></span>
   <div id="zaiList"></div>
-  <span class="hd">🟢平常 🟡お知らせ 🟠遅れ 🔴見合わせ・運休 🩵情報対象外の私鉄 ／ 阪急・阪神・近鉄・南海・大阪メトロ・京王・京急・京成・名鉄は公式情報を反映 ／ 行クリックで移動<br>
+  <span class="hd">🟢平常 🟡お知らせ 🟠遅れ 🔴見合わせ・運休 🩵情報対象外の私鉄 ／ 大手私鉄9社=公式・メトロ/都営/TX等=ODPT(公共交通オープンデータセンター)を反映 ／ 行クリックで移動<br>
   公式:
   <a href="https://www3.jrhokkaido.co.jp/webunkou/" target="_blank" rel="noopener">JR北</a>・
   <a href="https://traininfo.jreast.co.jp/train_info/" target="_blank" rel="noopener">JR東</a>・
@@ -1414,9 +1414,14 @@ function zaiSectionPath(ln, A, B){
 }
 const ZAI_PVT_OPS={ '阪急電鉄':'hankyu','阪神電気鉄道':'hanshin','近畿日本鉄道':'kintetsu',
   '南海電気鉄道':'nankai','大阪市高速電気軌道':'osakametro','京王電鉄':'keio',
-  '京浜急行電鉄':'keikyu','京成電鉄':'keisei','名古屋鉄道':'meitetsu' };
+  '京浜急行電鉄':'keikyu','京成電鉄':'keisei','名古屋鉄道':'meitetsu',
+  '東京地下鉄':'tokyometro','東京都':'toei','横浜市':'yokohama',
+  '東京臨海高速鉄道':'twr','首都圏新都市鉄道':'mir','多摩都市モノレール':'tamamono',
+  '東急電鉄':'tokyu','東武鉄道':'tobu','西武鉄道':'seibu','小田急電鉄':'odakyu','相模鉄道':'sotetsu' };
 const ZAI_PVT_LBL={ hankyu:'阪急',hanshin:'阪神',kintetsu:'近鉄',nankai:'南海',
-  osakametro:'大阪メトロ',keio:'京王',keikyu:'京急',keisei:'京成',meitetsu:'名鉄' };
+  osakametro:'大阪メトロ',keio:'京王',keikyu:'京急',keisei:'京成',meitetsu:'名鉄',
+  tokyometro:'東京メトロ',toei:'都営',yokohama:'横浜市営',twr:'りんかい',mir:'TX',
+  tamamono:'多摩モノ',tokyu:'東急',tobu:'東武',seibu:'西武',odakyu:'小田急',sotetsu:'相鉄' };
 function zaiLineState(ln){
   const L=zaiStatus&&zaiStatus.lines;
   if(ln.co){
