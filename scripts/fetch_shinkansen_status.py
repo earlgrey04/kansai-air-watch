@@ -126,6 +126,40 @@ def jr_east():
     return out
 
 
+
+
+ODPT_SHINK_KEYS = {'東北新幹線': 'tohoku', '山形新幹線': 'yamagata', '秋田新幹線': 'akita',
+                   '上越新幹線': 'joetsu', '北陸新幹線': 'hokuriku_east'}
+ODPT_SHINK_JA = {"JR-Central.TokaidoShinkansen": "東海道新幹線", "JR-East.AkitaShinkansen": "秋田新幹線", "JR-East.HokurikuShinkansen": "北陸新幹線", "JR-East.JoetsuShinkansen": "上越新幹線", "JR-East.TohokuShinkansen": "東北新幹線", "JR-East.YamagataShinkansen": "山形新幹線"}
+
+
+def jr_east_odpt(lines_out):
+    """JR東HTMLが403の環境向け: ODPTチャレンジAPIから新幹線運行情報"""
+    import os
+    token = os.environ.get('ODPT_CHALLENGE_TOKEN', '')
+    if not token:
+        raise RuntimeError('no ODPT_CHALLENGE_TOKEN')
+    raw = fetch('https://api-challenge.odpt.org/api/v4/odpt:TrainInformation'
+                f'?acl:consumerKey={token}', timeout=20)
+    found = {}
+    for e in json.loads(raw):
+        rid = (e.get('odpt:railway') or '').replace('odpt.Railway:', '')
+        key = ODPT_SHINK_KEYS.get(ODPT_SHINK_JA.get(rid, ''))
+        if not key:
+            continue
+        text = ((e.get('odpt:trainInformationText') or {}).get('ja') or '').strip()
+        if not text or re.search(r'平常|ありません|通常どおり|通常運転', text):
+            found[key] = {'status': 'normal', 'text': '平常運転'}
+        else:
+            st = classify(text)
+            found[key] = {'status': st, 'text': text[:160],
+                          'sections': extract_sections(text, st)}
+    if not found:
+        raise RuntimeError('ODPTに新幹線情報なし')
+    lines_out.update(found)
+    return found
+
+
 def jr_central():
     """東海道新幹線"""
     d = json.loads(fetch('https://traininfo.jr-central.co.jp/shinkansen/var/train_info/service_status.json'))
@@ -319,6 +353,16 @@ def main():
                 raw[k] = v
         except Exception as e:
             errors.append(f'{label}: {type(e).__name__}: {e}')
+            if label == 'JR東日本':
+                try:
+                    fb = {}
+                    jr_east_odpt(fb)
+                    for k, v in fb.items():
+                        v['source'] = 'JR東日本(ODPT)'
+                        raw[k] = v
+                    errors[-1] += ' → ODPTで代替取得'
+                except Exception as e2:
+                    errors.append(f'jre-odpt: {type(e2).__name__}: {e2}')
 
     # 北陸新幹線はJR東・JR西の悪い方を採用
     east = raw.pop('hokuriku_east', None)

@@ -43,9 +43,13 @@ def norm(name):
 
 
 def classify(text):
-    if re.search(r'見合わせ|見合せ|取り止め|取りやめ', text or ''):
+    t = text or ''
+    if re.search(r'見合わせ|見合せ|取り止め|取りやめ', t):
+        # 「見合わせていましたが運転を再開」等の過去形は遅れ扱い
+        if re.search(r'運転を再開', t) and not re.search(r'再開(?:予定|見込)', t):
+            return 'delay'
         return 'suspend'
-    if re.search(r'遅れ|遅延|運休', text or ''):
+    if re.search(r'遅れ|遅延|運休', t):
         return 'delay'
     return 'info'
 
@@ -322,21 +326,42 @@ ODPT_OP_KEY = {
     'MIR': ('mir', 'つくばエクスプレス'), 'TamaMonorail': ('tamamono', '多摩モノレール'),
     'Tokyu': ('tokyu', '東急電鉄'), 'Tobu': ('tobu', '東武鉄道'), 'Seibu': ('seibu', '西武鉄道'),
     'Odakyu': ('odakyu', '小田急電鉄'), 'Sotetsu': ('sotetsu', '相模鉄道'),
+    'Keio': ('keio', '京王電鉄'), 'Keikyu': ('keikyu', '京浜急行電鉄'),
 }
-ODPT_RAILWAY_JA = {"Keikyu.Airport": "空港線", "Keikyu.Kurihama": "久里浜線", "Keikyu.Main": "京急本線", "Keikyu.Zushi": "逗子線", "Keio.Dobutsuen": "動物園線", "Keio.Inokashira": "井の頭線", "Keio.Keibajo": "競馬場線", "Keio.Keio": "京王線", "Keio.KeioNew": "京王新線", "Keio.Sagamihara": "相模原線", "Keio.Takao": "高尾線", "MIR.TsukubaExpress": "つくばエクスプレス", "Odakyu.Enoshima": "江ノ島線", "Odakyu.Odawara": "小田原線", "Odakyu.Tama": "多摩線", "Seibu.Haijima": "拝島線", "Seibu.Ikebukuro": "池袋線", "Seibu.Sayama": "狭山線", "Seibu.SeibuChichibu": "西武秩父線", "Seibu.SeibuYurakucho": "西武有楽町線", "Seibu.Shinjuku": "新宿線", "Seibu.Toshima": "豊島線", "Sotetsu.Izumino": "いずみ野線", "Sotetsu.Main": "相鉄本線", "Sotetsu.SotetsuShinYokohama": "相鉄新横浜線", "TWR.Rinkai": "りんかい線", "TamaMonorail.TamaMonorail": "多摩モノレール", "Tobu.Isesaki": "伊勢崎線", "Tobu.Nikko": "日光線", "Tobu.TobuSkytree": "東武スカイツリーライン", "Tobu.TobuSkytreeBranch": "東武スカイツリーライン(押上-曳舟)", "Tobu.TobuUrbanPark": "東武アーバンパークライン", "Tobu.Tojo": "東上線", "Toei.Arakawa": "東京さくらトラム（都電荒川線）", "Toei.Asakusa": "浅草線", "Toei.Mita": "三田線", "Toei.NipporiToneri": "日暮里・舎人ライナー", "Toei.Oedo": "大江戸線", "Toei.Shinjuku": "新宿線", "TokyoMetro.Chiyoda": "千代田線", "TokyoMetro.Fukutoshin": "副都心線", "TokyoMetro.Ginza": "銀座線", "TokyoMetro.Hanzomon": "半蔵門線", "TokyoMetro.Hibiya": "日比谷線", "TokyoMetro.Marunouchi": "丸ノ内線", "TokyoMetro.MarunouchiBranch": "丸ノ内線支線", "TokyoMetro.Namboku": "南北線", "TokyoMetro.Tozai": "東西線", "TokyoMetro.Yurakucho": "有楽町線", "Tokyu.DenEnToshi": "田園都市線", "Tokyu.Ikegami": "池上線", "Tokyu.Meguro": "目黒線", "Tokyu.Oimachi": "大井町線", "Tokyu.TokyuShinYokohama": "東急新横浜線", "Tokyu.Toyoko": "東横線", "YokohamaMunicipal.Blue": "ブルーライン", "YokohamaMunicipal.Green": "グリーンライン"}
+ODPT_RAILWAY_JA = {"Sotetsu.Izumino": "いずみ野線", "Sotetsu.Main": "相鉄本線", "Sotetsu.SotetsuShinYokohama": "相鉄新横浜線", "Yurikamome.Yurikamome": "ゆりかもめ", "TWR.Rinkai": "りんかい線", "Toei.Arakawa": "東京さくらトラム", "Toei.Asakusa": "浅草線", "Keikyu.Main": "京急本線", "Keikyu.Zushi": "逗子線", "TokyoMetro.Marunouchi": "丸ノ内線", "Odakyu.Enoshima": "江ノ島線", "Odakyu.Odawara": "小田原線", "Toei.Mita": "三田線", "Toei.NipporiToneri": "日暮里・舎人ライナー", "Toei.Oedo": "大江戸線", "Toei.Shinjuku": "新宿線", "MIR.TsukubaExpress": "つくばエクスプレス", "Odakyu.Tama": "多摩線", "TokyoMetro.Chiyoda": "千代田線", "Keikyu.Airport": "空港線", "Keikyu.Kurihama": "久里浜線", "Tobu.Isesaki": "伊勢崎線", "TokyoMetro.Namboku": "南北線", "Seibu.Haijima": "拝島線", "Seibu.Ikebukuro": "池袋線", "Seibu.Sayama": "狭山線", "Seibu.SeibuChichibu": "西武秩父線", "Seibu.SeibuYurakucho": "西武有楽町線", "TokyoMetro.Fukutoshin": "副都心線", "TokyoMetro.Ginza": "銀座線", "Seibu.Shinjuku": "新宿線", "Seibu.Toshima": "豊島線", "Tobu.Nikko": "日光線", "Tobu.TobuSkytreeBranch": "東武スカイツリーライン(押上-曳舟)", "Tobu.TobuSkytree": "東武スカイツリーライン", "Tobu.TobuUrbanPark": "東武アーバンパークライン", "Tobu.Tojo": "東上線", "Tokyu.DenEnToshi": "田園都市線", "Tokyu.Ikegami": "池上線", "Keio.Dobutsuen": "動物園線", "TokyoMetro.Hanzomon": "半蔵門線", "TokyoMetro.Hibiya": "日比谷線", "Tokyu.Meguro": "目黒線", "Tokyu.Oimachi": "大井町線", "Tokyu.Toyoko": "東横線", "TokyoMetro.Tozai": "東西線", "TamaMonorail.TamaMonorail": "多摩モノレール", "Tokyu.TokyuShinYokohama": "東急新横浜線", "YokohamaMunicipal.Blue": "ブルーライン", "YokohamaMunicipal.Green": "グリーンライン", "TokyoMetro.Yurakucho": "有楽町線", "Keio.Keibajo": "競馬場線", "JR-Central.TokaidoShinkansen": "東海道新幹線", "TokyoMetro.MarunouchiBranch": "丸ノ内線支線", "Hokuso.Hokuso": "北総線", "JR-East.AkitaShinkansen": "秋田新幹線", "JR-East.HokurikuShinkansen": "北陸新幹線", "JR-East.JoetsuShinkansen": "上越新幹線", "JR-East.TohokuShinkansen": "東北新幹線", "JR-East.YamagataShinkansen": "山形新幹線", "Keio.Inokashira": "井の頭線", "Keio.KeioNew": "京王新線", "Keio.Keio": "京王線", "Keio.Sagamihara": "相模原線", "Keisei.Main": "京成本線", "Keisei.NaritaSkyAccess": "成田スカイアクセス線", "Keisei.Oshiage": "押上線", "Minatomirai.Minatomirai": "みなとみらい線", "OdakyuHakone.HakoneTozan": "箱根登山線", "SaitamaRailway.SaitamaRailway": "埼玉高速鉄道線", "Shibayama.Shibayama": "芝山鉄道線", "TokyoMonorail.HanedaAirport": "羽田空港線", "JR-East.Utsunomiya": "宇都宮線", "KantoRailway.Joso": "常総線", "Keio.Takao": "高尾線", "ToyoRapid.ToyoRapid": "東葉高速線", "JR-East.ChuoRapid": "中央線快速", "JR-East.ChuoSobuLocal": "中央・総武各駅停車", "JR-East.JobanLocal": "常磐線各駅停車", "JR-East.JobanRapid": "常磐線快速", "JR-East.KeihinTohokuNegishi": "京浜東北線・根岸線", "JR-East.Keiyo": "京葉線", "JR-East.Musashino": "武蔵野線", "JR-East.Nambu": "南武線", "JR-East.Ome": "青梅線", "JR-East.SaikyoKawagoe": "埼京線・川越線", "JR-East.ShonanShinjuku": "湘南新宿ライン", "JR-East.SobuRapid": "総武快速線", "JR-East.SotetsuDirect": "相鉄直通線", "JR-East.Takasaki": "高崎線", "JR-East.Tokaido": "東海道線", "JR-East.Yamanote": "山手線", "JR-East.Yokohama": "横浜線", "JR-East.Yokosuka": "横須賀線", "ChibaMonorail.Line2": "２号線", "JR-Central.Chuo": "中央本線", "Tokyu.Kodomonokuni": "こどもの国線", "Tokyu.Setagaya": "世田谷線", "Tobu.Kinugawa": "鬼怒川線", "Tokyu.TokyuTamagawa": "東急多摩川線", "Tobu.Daishi": "大師線", "Tobu.Kameido": "亀戸線", "Tobu.Kiryu": "桐生線", "Tobu.KoizumiBranch": "小泉線(東小泉-太田)", "Tobu.Koizumi": "小泉線", "Tobu.Ogose": "越生線", "Tobu.Sano": "佐野線", "Isumi.Isumi": "いすみ線", "JR-East.BanetsuEast": "磐越東線", "Tobu.Utsunomiya": "宇都宮線", "IzuHakone.Daiyuzan": "大雄山線", "IzuHakone.Sunzu": "駿豆線", "Aizu.Aizu": "会津線", "ChibaMonorail.Line1": "１号線", "Seibu.Kokubunji": "国分寺線", "Izukyu.Izukyu": "伊豆急行線", "JR-East.BanetsuWest": "磐越西線", "Seibu.Seibuen": "西武園線", "Seibu.Tamagawa": "多摩川線", "Seibu.Tamako": "多摩湖線", "Seibu.Yamaguchi": "山口線", "Chichibu.Chichibu": "秩父本線", "Choshi.Choshi": "銚子電鉄線", "Enoden.Enoden": "江ノ島電鉄線", "Fujikyu.Fujikyu": "富士急行線", "Hitachinaka.Minato": "湊線", "Hokuetsu.Hokuhoku": "ほくほく線", "JR-Central.Gotemba": "御殿場線", "JR-Central.Minobu": "身延線", "JR-Central.Tokaido": "東海道線", "JR-East.Aterazawa": "左沢線", "JR-East.ChuoTatsunoBranch": "中央本線辰野支線", "JR-East.Echigo": "越後線", "JR-East.Gono": "五能線", "JR-East.Hachinohe": "八戸線", "JR-East.Hakushin": "白新線", "JR-East.Hanawa": "花輪線", "JR-East.Iiyama": "飯山線", "JR-East.Ishinomaki": "石巻線", "JR-East.Kamaishi": "釜石線", "JR-East.Karasuyama": "烏山線", "JR-East.Kesennuma": "気仙沼線", "JR-East.Kitakami": "北上線", "JR-East.Koumi": "小海線", "JR-East.Mito": "水戸線", "JR-East.Nikko": "日光線", "JR-East.Ofunato": "大船渡線", "JR-East.Oga": "男鹿線", "JR-East.Oito": "大糸線", "JR-East.Ominato": "大湊線", "JR-East.OuYamagata": "山形線", "JR-East.Ou": "奥羽本線", "JR-East.RikuEast": "陸羽東線", "JR-East.RikuWest": "陸羽西線", "JR-East.Ryomo": "両毛線", "JR-East.SensekiTohoku": "仙石東北ライン", "JR-East.Senseki": "仙石線", "JR-East.Senzan": "仙山線", "JR-East.Shinetsu": "信越本線", "JR-East.Shinonoi": "篠ノ井線", "JR-East.SuigunBranch": "水郡線支線", "JR-East.Suigun": "水郡線", "JR-East.Tadami": "只見線", "JR-East.Tazawako": "田沢湖線", "JR-East.Tohoku": "東北本線", "JR-East.Tsugaru": "津軽線", "JR-East.Uetsu": "羽越本線", "JR-East.Yahiko": "弥彦線", "JR-East.Yamada": "山田線", "JR-East.Yonesaka": "米坂線", "JR-Shikoku.SetoOhashi": "瀬戸大橋線", "JR-West.Sanin": "山陰本線", "Jomo.Jomo": "上毛線", "Joshin.Joshin": "上信線", "KantoRailway.Ryugasaki": "竜ヶ崎線", "KashimaRinkai.OaraiKashima": "大洗鹿島線", "Keisei.Chiba": "千葉線", "Keisei.HigashiNarita": "東成田線", "Keisei.Kanamachi": "金町線", "Keisei.Matsudo": "松戸線", "Kominato.Kominato": "小湊鉄道線", "MaihamaResort.DisneyResort": "ディズニーリゾートライン", "Ryutetsu.Nagareyama": "流山線", "SaitamaTransit.NewShuttle": "ニューシャトル", "SendaiAirportTransit.SendaiAirport": "仙台空港線", "SendaiMunicipal.Namboku": "南北線", "SendaiMunicipal.Tozai": "東西線", "ShonanMonorail.ShonanMonorail": "湘南モノレール線", "UtsunomiyaLightRail.UtsunomiyaLightRail": "宇都宮ライトレール", "WataraseKeikoku.WataraseKeikoku": "わたらせ渓谷線", "Yagan.AizuKinugawa": "会津鬼怒川線", "YokohamaSeaside.KanazawaSeaside": "金沢シーサイドライン", "Keikyu.Daishi": "大師線", "JR-East.Agatsuma": "吾妻線", "JR-East.Chuo": "中央本線", "JR-East.Hachiko": "八高線", "JR-East.Ito": "伊東線", "JR-East.Itsukaichi": "五日市線", "JR-East.Joban": "常磐線", "JR-East.Joetsu": "上越線", "JR-East.Kashima": "鹿島線", "JR-East.Kawagoe": "川越線(川越-高麗川間)", "JR-East.Kururi": "久留里線", "JR-East.NambuBranch": "南武線浜川崎支線", "JR-East.NaritaAbikoBranch": "成田線我孫子支線", "JR-East.TsurumiOkawaBranch": "鶴見線大川支線", "JR-East.NaritaAirportBranch": "成田線空港支線", "JR-East.Narita": "成田線", "JR-East.Sagami": "相模線", "JR-East.Sobu": "総武本線", "JR-East.Sotobo": "外房線", "JR-East.Togane": "東金線", "JR-East.TsurumiUmiShibauraBranch": "鶴見線海芝浦支線", "JR-East.Tsurumi": "鶴見線", "JR-East.Uchibo": "内房線"}
 
 
 def odpt_private(lines):
-    """ODPTのTrainInformation(全事業者一括1リクエスト)を路線単位で反映"""
-    token = os.environ.get('ODPT_TOKEN', '')
-    if not token:
+    """ODPTのTrainInformation(センター＋チャレンジの2ソース)を路線単位で反映"""
+    sources = []
+    if os.environ.get('ODPT_TOKEN'):
+        sources.append(('https://api.odpt.org/api/v4/odpt:TrainInformation'
+                        f"?acl:consumerKey={os.environ['ODPT_TOKEN']}"))
+    if os.environ.get('ODPT_CHALLENGE_TOKEN'):
+        sources.append(('https://api-challenge.odpt.org/api/v4/odpt:TrainInformation'
+                        f"?acl:consumerKey={os.environ['ODPT_CHALLENGE_TOKEN']}"))
+    if not sources:
         return 0
-    raw = fetch('https://api.odpt.org/api/v4/odpt:TrainInformation'
-                f'?acl:consumerKey={token}', timeout=20)
-    data = json.loads(raw)
+    data = []
+    for url in sources:
+        try:
+            data.extend(json.loads(fetch(url, timeout=20)))
+        except Exception:
+            pass
     per_co = {}
     for e in data:
         op = (e.get('odpt:operator') or '').split(':')[-1]
+        rid0 = (e.get('odpt:railway') or '').replace('odpt.Railway:', '')
+        if op in ('jre-is', 'JR-East'):
+            if 'Shinkansen' in rid0:
+                continue
+            ja0 = ODPT_RAILWAY_JA.get(rid0, rid0.split('.')[-1])
+            text0 = ((e.get('odpt:trainInformationText') or {}).get('ja') or '').strip()
+            if text0 and not re.search(r'平常|ありません|通常どおり|通常運転', text0):
+                st0 = classify(text0)
+                put(lines, 'jre:' + norm(ja0), st0, f'{ja0}: {text0[:180]}',
+                    extract_sections(text0, st0))
+            continue
         km = ODPT_OP_KEY.get(op)
         if not km:
             continue
