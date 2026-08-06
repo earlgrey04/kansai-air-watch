@@ -122,7 +122,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v60-odpt</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🛰️ <b>関西エアウォッチ 3D</b> <span style="font-size:10px;color:#5f7fa6">v61-train-location</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -420,6 +420,8 @@ function clearNewModes(){
   zaiSecEnts=[];
   if(hwySrc){ try{ viewer.dataSources.remove(hwySrc,true); }catch(_){} hwySrc=null; }
   if(zaiHwySrc){ try{ viewer.dataSources.remove(zaiHwySrc,true); }catch(_){} zaiHwySrc=null; }
+  if(zaiTrainSrc){ try{ viewer.dataSources.remove(zaiTrainSrc,true); }catch(_){} zaiTrainSrc=null; }
+  if(zaiTrainTimer){ try{ clearInterval(zaiTrainTimer); }catch(_){} zaiTrainTimer=null; }
   if(hwyZaiSrc){ try{ viewer.dataSources.remove(hwyZaiSrc,true); }catch(_){} hwyZaiSrc=null; }
   if(hwyEvSrc){ try{ viewer.dataSources.remove(hwyEvSrc,true); }catch(_){} hwyEvSrc=null; }
   if(hwyOrbisSrc){ try{ viewer.dataSources.remove(hwyOrbisSrc,true); }catch(_){} hwyOrbisSrc=null; }
@@ -1336,6 +1338,7 @@ function renderZaiPanel(){
 }
 var zaiStations=null, zaiStIdx=null, zaiSecEnts=[];
 var zaiShinkSrc=null, zaiShinkOn=true;   // 在来線モードでの新幹線重ね書き
+var zaiTrainOn=false, zaiTrainSrc=null, zaiTrainTimer=null, zaiTrainSt=null;
 async function zaiDrawShink(){
   try{
     if(!zaiShinkSrc){ zaiShinkSrc=new Cesium.CustomDataSource('zai-shink'); viewer.dataSources.add(zaiShinkSrc); }
@@ -1549,6 +1552,8 @@ async function loadZairaisen(){
     applyZaiStatus();
     if(zaiShinkOn) zaiDrawShink();
     if(zaiHwyOn) zaiDrawHwy();
+    if(zaiTrainOn){ zaiRefreshTrains();
+      if(!zaiTrainTimer) zaiTrainTimer=setInterval(()=>{ if(zaiTrainOn) zaiRefreshTrains(); }, 25000); }
     if(!zaiStatus) setErr('運行情報の取得に失敗(経路のみ表示)');
   }catch(e){ setErr('在来線データの取得失敗: '+(e&&e.message||e)); }
 }
@@ -1573,7 +1578,8 @@ function setZairaisen(){
     mb.innerHTML='<button data-f="all" class="on" onclick="setZaiFilter(false)">JR＋私鉄</button>'+
       '<button data-f="jr" onclick="setZaiFilter(true)">JRのみ</button>'+
       `<button data-f="shink" class="${zaiShinkOn?'on':''}" onclick="zaiToggleShink()">🚄新幹線</button>`+
-      `<button data-f="hwy" class="${zaiHwyOn?'on':''}" onclick="zaiToggleHwy()">🛣️道路</button>`;
+      `<button data-f="hwy" class="${zaiHwyOn?'on':''}" onclick="zaiToggleHwy()">🛣️道路</button>`+
+      `<button data-f="train" class="${zaiTrainOn?'on':''}" onclick="zaiToggleTrains()">🚃走行位置</button>`;
     mb.style.display='flex';
   }
   zaiJrOnly=false;
@@ -2356,6 +2362,64 @@ function setHighway(){
 // ===== 在来線⇔高速道路の相互重ね書きオーバーレイ =====
 var zaiHwyOn=false, zaiHwySrc=null;   // 在来線モードに高速道路を重ねる
 var hwyZaiOn=false, hwyZaiSrc=null;   // 高速道路モードに在来線を重ねる
+const TRAINS_URL='https://iisatjsohjknjldpjslb.supabase.co/storage/v1/object/public/history/trains/latest.json';
+function zaiTrainColor(delay){
+  const d=delay||0;
+  if(d>=600) return '#ff2800';
+  if(d>=300) return '#ff9e00';
+  if(d>=60) return '#ffd23f';
+  return '#35d07f';
+}
+async function zaiRefreshTrains(){
+  try{
+    if(!zaiTrainSt) zaiTrainSt=await (await fetch('odpt_stations.json')).json();
+    const d=await (await fetch(TRAINS_URL+'?t='+Date.now(),{cache:'no-store'})).json();
+    if(!zaiTrainSrc){ zaiTrainSrc=new Cesium.CustomDataSource('zai-trains'); viewer.dataSources.add(zaiTrainSrc); }
+    zaiTrainSrc.entities.removeAll();
+    zaiTrainSrc.show=true;
+    const S=zaiTrainSt.s, R=zaiTrainSt.r||{};
+    let n=0;
+    for(const [rw,num,from,to,delay,dest] of d.tr||[]){
+      const a=from&&S[from], b=to&&S[to];
+      if(!a&&!b) continue;
+      const lon=a&&b? (a[0]+b[0])/2 : (a||b)[0];
+      const lat=a&&b? (a[1]+b[1])/2 : (a||b)[1];
+      n++;
+      const col=Cesium.Color.fromCssColorString(zaiTrainColor(delay));
+      const ja=R[rw]||rw.split('.').pop();
+      const destJa=dest&&S[dest]? S[dest][2] : (dest? dest.split('.').pop() : '');
+      const dtxt=delay? `遅れ約${Math.round(delay/60)}分` : '定刻';
+      zaiTrainSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(lon,lat,1550),
+        name:`${ja} ${num}`,
+        description:`<div style="font-size:13px"><b>🚃 ${shinkEsc(ja)}</b> 列車番号 ${shinkEsc(num)}<br>`+
+          `${destJa?shinkEsc(destJa)+'行き・':''}${dtxt}${to?'':'（駅停車中）'}<br>`+
+          `<span style="color:#889">位置は駅間の概算。出典 公共交通オープンデータセンター</span></div>`,
+        point:{ pixelSize:6, color:col, outlineColor:Cesium.Color.BLACK, outlineWidth:1.5,
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,1.2e6) },
+        label:{ text:(destJa||'')+(delay?` +${Math.round(delay/60)}分`:''), font:'10px sans-serif',
+          fillColor:Cesium.Color.WHITE, outlineColor:Cesium.Color.BLACK, outlineWidth:2,
+          style:Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset:new Cesium.Cartesian2(0,-11),
+          distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0,6e4) } });
+    }
+    const c=document.getElementById('cnt');
+    if(c&&zaiTrainOn&&zaiData) c.textContent=`${zaiData.lines.length} 路線／🚃${n}本`;
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }catch(_){}
+}
+function zaiToggleTrains(){
+  zaiTrainOn=!zaiTrainOn;
+  const b=document.querySelector('#modebar button[data-f="train"]');
+  if(b)b.classList.toggle('on', zaiTrainOn);
+  if(zaiTrainOn){
+    zaiRefreshTrains();
+    if(!zaiTrainTimer) zaiTrainTimer=setInterval(()=>{ if(zaiTrainOn) zaiRefreshTrains(); }, 25000);
+  } else {
+    if(zaiTrainSrc) zaiTrainSrc.show=false;
+    if(zaiTrainTimer){ clearInterval(zaiTrainTimer); zaiTrainTimer=null; }
+    const c=document.getElementById('cnt'); if(c&&zaiData) c.textContent=`${zaiData.lines.length} 路線`;
+    try{ viewer.scene.requestRender(); }catch(_){}
+  }
+}
 async function zaiDrawHwy(){
   try{
     if(!hwyLines) hwyLines=await (await fetch('highway_lines.json')).json();
