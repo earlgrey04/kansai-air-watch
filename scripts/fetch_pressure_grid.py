@@ -55,7 +55,7 @@ def main():
         for tryi in range(4):
             try:
                 req = urllib.request.Request(url, headers={'User-Agent': 'kansai-air-watch/1.0'})
-                with urllib.request.urlopen(req, timeout=60) as r:
+                with urllib.request.urlopen(req, timeout=35) as r:
                     d = json.load(r)
                 arr = d if isinstance(d, list) else [d]
                 if arr and arr[0].get('hourly'):
@@ -63,7 +63,7 @@ def main():
                 arr = None
             except Exception:
                 arr = None
-            time.sleep(20 * (tryi + 1))
+            time.sleep(8 * (tryi + 1))
         if not arr:
             raise SystemExit('Open-Meteo取得失敗(レート制限の可能性)')
         for k, v in enumerate(arr):
