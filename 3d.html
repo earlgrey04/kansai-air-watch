@@ -412,8 +412,6 @@ function clearNewModes(){
   if(shinkStTimer){ try{ clearInterval(shinkStTimer); }catch(_){} shinkStTimer=null; }
   if(tySrc){ try{ viewer.dataSources.remove(tySrc,true); }catch(_){} tySrc=null; }
   if(tyHistSrc){ try{ viewer.dataSources.remove(tyHistSrc,true); }catch(_){} tyHistSrc=null; }
-  if(tyAiSrc){ try{ viewer.dataSources.remove(tyAiSrc,true); }catch(_){} tyAiSrc=null; }
-  tyAiOn=false;
   if(tyTimer){ try{ clearInterval(tyTimer); }catch(_){} tyTimer=null; }
   tyDecade=null;
   try{ tyStopAnim(); }catch(_){}
@@ -2138,122 +2136,6 @@ async function loadTyphoon(){
   setErr(null);
   try{ viewer.scene.requestRender(); }catch(_){}
 }
-// ===== AI予測(WeatherNext Cyclones Mini・自宅RTX5090で生成) =====
-// 気象庁の実況/予報円(白系)と重ねて比較するアンサンブル進路。メンバー別に色分け。
-var tyAiOn=false, tyAiSrc=null, tyAiData=null;
-const TY_AI_URLS=[
-  { url:'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/weathernext_typhoon.json?ref=status',
-    opts:{ headers:{ 'Accept':'application/vnd.github.raw+json' } } },
-  { url:'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/weathernext_typhoon.json', bust:true },
-  { url:'weathernext_typhoon.json' },
-];
-// 台風ごとに色を割り当てる(気象庁の実況台風と照合してAI予測を紐づけ)
-const TY_AI_STORMCOL=['#ff5a3c','#3c8cff','#12b886','#ffb02e','#b06cff','#ff5ea8','#00c2d1','#9acd32'];
-function tyGcKm(la1,lo1,la2,lo2){ const R=6371,rad=Math.PI/180;
-  const d1=(la2-la1)*rad, d2=(((lo2-lo1+180)%360)-180)*rad;
-  const a=Math.sin(d1/2)**2+Math.cos(la1*rad)*Math.cos(la2*rad)*Math.sin(d2/2)**2;
-  return 2*R*Math.asin(Math.sqrt(a)); }
-async function fetchTyAi(){
-  for(const s of TY_AI_URLS){
-    try{
-      const u=s.bust ? s.url+'?t='+Date.now() : s.url;
-      const r=await fetch(u,{ cache:'no-store', ...(s.opts||{}) });
-      if(r.ok) return await r.json();
-    }catch(_){}
-  }
-  return null;
-}
-// 気象庁の現在の台風(番号・名前・実況位置)を取得してAI予測の照合に使う
-async function fetchJmaStorms(){
-  const out=[];
-  try{
-    const list=await (await fetch(TY_BASE+'data/targetTc.json',{cache:'no-store'})).json();
-    for(const e of list){
-      const id=e.tropicalCyclone; if(!id)continue;
-      try{
-        const fc=await (await fetch(`${TY_BASE}data/${id}/forecast.json`,{cache:'no-store'})).json();
-        let name='',num=e.typhoonNumber||'',pos=null;
-        for(const el of fc){
-          if(el.part==='title'){ name=(el.name&&el.name.jp)||''; num=el.typhoonNumber||num; }
-          if(el.advancedHours===0){ const tk=el.track&&el.track.typhoon; if(tk&&tk.length)pos=tk[tk.length-1]; }
-          if(pos===null && el.center)pos=el.center;
-        }
-        if(pos)out.push({num,name,lat:pos[0],lon:((pos[1]+180)%360)-180});
-      }catch(_){}
-    }
-  }catch(_){}
-  return out;
-}
-async function drawTyAi(){
-  if(!tyAiData){ tyAiData=await fetchTyAi(); }
-  if(!tyAiData){ setErr('AI予測データの取得失敗'); return; }
-  if(!tyAiSrc){ tyAiSrc=new Cesium.CustomDataSource('ty-ai'); viewer.dataSources.add(tyAiSrc); }
-  tyAiSrc.entities.removeAll(); tyAiSrc.show=true;
-  const storms=await fetchJmaStorms();       // 実況台風リスト
-  const stormCol={}, stormName={}, stormPts={};
-  const to180=x=>((x+180)%360)-180;
-  // 各AIトラックを実況台風に割り当て(シード由来=台風番号で直結、それ以外=距離照合)
-  const assigned=[];
-  for(const m of tyAiData.members){
-    for(const tr of m.tracks){
-      const p0=tr.pts[0], la=p0[1], lo=to180(p0[0]);
-      let key='(照合なし)';
-      const jm=/^jma(\d{4})/.exec(String(tr.id||''));
-      if(jm){
-        const s=storms.find(x=>x.num===jm[1]);
-        key=`台風${Number(jm[1].slice(2))}号${s&&s.name?(' '+s.name):''}`;
-      }else{
-        let best=null,bd=1e9;
-        for(const s of storms){ const d=tyGcKm(la,lo,s.lat,s.lon); if(d<bd){bd=d;best=s;} }
-        if(best&&bd<700) key=`台風${Number(best.num)}号 ${best.name}`;
-      }
-      if(!(key in stormCol)){ const i=Object.keys(stormCol).length;
-        stormCol[key]=key==='(照合なし)'?'#9aa5b1':TY_AI_STORMCOL[i%TY_AI_STORMCOL.length]; stormPts[key]=[]; }
-      stormPts[key].push([lo,la]);
-      assigned.push({m:m.member,tr,key});
-    }
-  }
-  // 描画: 照合済み=太く鮮やか＋名前、未照合(気象庁の命名台風と結びつかない弱い系)=細く薄く
-  for(const a of assigned){
-    const matched = a.key!=='(照合なし)';
-    const col=Cesium.Color.fromCssColorString(stormCol[a.key]);
-    const deg=[]; for(const p of a.tr.pts){ deg.push(p[0],p[1]); }
-    let wmax=0; for(const p of a.tr.pts){ if(p[3]!=null&&p[3]>wmax){wmax=p[3];} }
-    tyAiSrc.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArray(deg),
-      width:matched?2.6:1.2, material:col.withAlpha(matched?0.92:0.4), clampToGround:false },
-      description:`<div style="font-size:13px"><b>${matched?(a.key+' のAI予測'):'AI予測(気象庁の命名台風に未対応の系)'}</b>（member${a.m}）<br>`+
-        `${tyAiData.model} ／ 最大風速 ${wmax}kt<br>初期時刻 ${tyAiData.init}<br>${tyAiData.source}</div>` });
-    if(matched) tyAiSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(a.tr.pts[0][0],a.tr.pts[0][1]),
-      point:{ pixelSize:6, color:col, outlineColor:Cesium.Color.WHITE, outlineWidth:1 } });
-  }
-  // 台風名ラベルを1台風につき1つ(AI予測群の平均位置)
-  for(const key in stormPts){
-    if(key==='(照合なし)')continue;
-    const ps=stormPts[key]; const mlon=ps.reduce((s,p)=>s+p[0],0)/ps.length,
-      mlat=ps.reduce((s,p)=>s+p[1],0)/ps.length;
-    tyAiSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(mlon,mlat),
-      label:{ text:`🤖 ${key}\nAI予測`, font:'bold 12px sans-serif',
-        fillColor:Cesium.Color.fromCssColorString(stormCol[key]),
-        style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineColor:Cesium.Color.BLACK, outlineWidth:3,
-        showBackground:true, backgroundColor:Cesium.Color.BLACK.withAlpha(0.55),
-        pixelOffset:new Cesium.Cartesian2(0,-18),
-        verticalOrigin:Cesium.VerticalOrigin.BOTTOM } });
-  }
-  tyAiData._matched=Object.keys(stormPts).filter(k=>k!=='(照合なし)');
-  try{ viewer.scene.requestRender(); }catch(_){}
-}
-function tyAiOff(){ if(tyAiSrc){ tyAiSrc.show=false; tyAiSrc.entities.removeAll(); } tyAiOn=false;
-  const b=document.getElementById('bTyAi'); if(b)b.classList.remove('on'); }
-function toggleTyAi(){
-  const b=document.getElementById('bTyAi');
-  if(tyAiOn){ tyAiOff(); const u=document.getElementById('upd');
-    if(u) u.textContent=u.textContent.replace(/ ／ AI予測.*$/,''); return; }
-  tyAiOn=true; if(b)b.classList.add('on');
-  drawTyAi().then(()=>{ const u=document.getElementById('upd');
-    if(u&&tyAiData){ const mt=(tyAiData._matched&&tyAiData._matched.length)
-      ? `：${tyAiData._matched.join('・')}`:'';
-      u.textContent+=` ／ 🤖AI予測(台風ごとに色分け・${tyAiData.members.length}メンバー)${mt}。${tyAiData.model} 初期${tyAiData.init}`; } });
-}
 function setTyphoon(){
   { const btn=document.getElementById('bTy');   // 2度押しでOFF(ライブへ)
     if(btn && btn.classList.contains('on')){ setLive(); return; } }
@@ -2267,8 +2149,7 @@ function setTyphoon(){
   viewer.entities.removeAll(); plateVecEnts=[];
   const mb=document.getElementById('modebar');
   if(mb){
-    mb.innerHTML='<button id="bTyAi" onclick="toggleTyAi()" title="WeatherNext(自宅GPUで生成)のAI予測進路を重ねる">🤖 AI予測</button>'+
-      '<span style="color:#9fb8d6;font:11px sans-serif;align-self:center;margin-left:6px">過去の経路:</span>'+
+    mb.innerHTML='<span style="color:#9fb8d6;font:11px sans-serif;align-self:center">過去の経路:</span>'+
       [1950,1960,1970,1980,1990,2000,2010,2020].map(d=>
         `<button data-d="${d}" onclick="selectTyDecade(${d})">${d}s</button>`).join('');
     mb.style.display='flex';
