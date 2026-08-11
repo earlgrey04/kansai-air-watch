@@ -412,6 +412,8 @@ function clearNewModes(){
   if(shinkStTimer){ try{ clearInterval(shinkStTimer); }catch(_){} shinkStTimer=null; }
   if(tySrc){ try{ viewer.dataSources.remove(tySrc,true); }catch(_){} tySrc=null; }
   if(tyHistSrc){ try{ viewer.dataSources.remove(tyHistSrc,true); }catch(_){} tyHistSrc=null; }
+  if(tyAiSrc){ try{ viewer.dataSources.remove(tyAiSrc,true); }catch(_){} tyAiSrc=null; }
+  tyAiOn=false;
   if(tyTimer){ try{ clearInterval(tyTimer); }catch(_){} tyTimer=null; }
   tyDecade=null;
   try{ tyStopAnim(); }catch(_){}
@@ -2136,6 +2138,63 @@ async function loadTyphoon(){
   setErr(null);
   try{ viewer.scene.requestRender(); }catch(_){}
 }
+// ===== AI予測(WeatherNext Cyclones Mini・自宅RTX5090で生成) =====
+// 気象庁の実況/予報円(白系)と重ねて比較するアンサンブル進路。メンバー別に色分け。
+var tyAiOn=false, tyAiSrc=null, tyAiData=null;
+const TY_AI_URLS=[
+  { url:'https://api.github.com/repos/earlgrey04/kansai-air-watch/contents/weathernext_typhoon.json?ref=status',
+    opts:{ headers:{ 'Accept':'application/vnd.github.raw+json' } } },
+  { url:'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/weathernext_typhoon.json', bust:true },
+  { url:'weathernext_typhoon.json' },
+];
+const TY_AI_COL=['#ff5a3c','#12b886','#3c8cff','#b06cff','#ffb02e','#ff5ea8','#00c2d1','#9acd32'];
+async function fetchTyAi(){
+  for(const s of TY_AI_URLS){
+    try{
+      const u=s.bust ? s.url+'?t='+Date.now() : s.url;
+      const r=await fetch(u,{ cache:'no-store', ...(s.opts||{}) });
+      if(r.ok) return await r.json();
+    }catch(_){}
+  }
+  return null;
+}
+async function drawTyAi(){
+  if(!tyAiData){ tyAiData=await fetchTyAi(); }
+  if(!tyAiData){ setErr('AI予測データの取得失敗'); return; }
+  if(!tyAiSrc){ tyAiSrc=new Cesium.CustomDataSource('ty-ai'); viewer.dataSources.add(tyAiSrc); }
+  tyAiSrc.entities.removeAll(); tyAiSrc.show=true;
+  for(const m of tyAiData.members){
+    const col=Cesium.Color.fromCssColorString(TY_AI_COL[m.member%TY_AI_COL.length]);
+    for(const tr of m.tracks){
+      const deg=[]; for(const p of tr.pts){ deg.push(p[0],p[1]); }
+      tyAiSrc.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArray(deg),
+        width:2.4, material:col.withAlpha(0.92), clampToGround:false } });
+      // 発生地点マーカー＋最大風速
+      const p0=tr.pts[0];
+      let wmax=0, wpt=p0; for(const p of tr.pts){ if(p[3]!=null&&p[3]>wmax){ wmax=p[3]; wpt=p; } }
+      tyAiSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(p0[0],p0[1]),
+        point:{ pixelSize:7, color:col, outlineColor:Cesium.Color.WHITE, outlineWidth:1 },
+        description:`<div style="font-size:13px"><b>AI予測 member${m.member}</b>（${tyAiData.model}）<br>`+
+          `最大風速 ${wmax}kt ／ 初期時刻 ${tyAiData.init}<br>${tyAiData.source}</div>` });
+      if(wmax>=45){ tyAiSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(wpt[0],wpt[1]),
+        label:{ text:`${wmax}kt`, font:'10px sans-serif', fillColor:col,
+          style:Cesium.LabelStyle.FILL, showBackground:true,
+          backgroundColor:Cesium.Color.BLACK.withAlpha(0.5),
+          pixelOffset:new Cesium.Cartesian2(0,-12) } }); }
+    }
+  }
+  try{ viewer.scene.requestRender(); }catch(_){}
+}
+function tyAiOff(){ if(tyAiSrc){ tyAiSrc.show=false; tyAiSrc.entities.removeAll(); } tyAiOn=false;
+  const b=document.getElementById('bTyAi'); if(b)b.classList.remove('on'); }
+function toggleTyAi(){
+  const b=document.getElementById('bTyAi');
+  if(tyAiOn){ tyAiOff(); const u=document.getElementById('upd');
+    if(u) u.textContent=u.textContent.replace(/ ／ AI予測.*$/,''); return; }
+  tyAiOn=true; if(b)b.classList.add('on');
+  drawTyAi().then(()=>{ const u=document.getElementById('upd');
+    if(u&&tyAiData) u.textContent+=` ／ AI予測(色線)=${tyAiData.model} 初期${tyAiData.init}・${tyAiData.members.length}メンバー`; });
+}
 function setTyphoon(){
   { const btn=document.getElementById('bTy');   // 2度押しでOFF(ライブへ)
     if(btn && btn.classList.contains('on')){ setLive(); return; } }
@@ -2149,7 +2208,8 @@ function setTyphoon(){
   viewer.entities.removeAll(); plateVecEnts=[];
   const mb=document.getElementById('modebar');
   if(mb){
-    mb.innerHTML='<span style="color:#9fb8d6;font:11px sans-serif;align-self:center">過去の経路:</span>'+
+    mb.innerHTML='<button id="bTyAi" onclick="toggleTyAi()" title="WeatherNext(自宅GPUで生成)のAI予測進路を重ねる">🤖 AI予測</button>'+
+      '<span style="color:#9fb8d6;font:11px sans-serif;align-self:center;margin-left:6px">過去の経路:</span>'+
       [1950,1960,1970,1980,1990,2000,2010,2020].map(d=>
         `<button data-d="${d}" onclick="selectTyDecade(${d})">${d}s</button>`).join('');
     mb.style.display='flex';
