@@ -2192,14 +2192,21 @@ async function drawTyAi(){
   const storms=await fetchJmaStorms();       // 実況台風リスト
   const stormCol={}, stormName={}, stormPts={};
   const to180=x=>((x+180)%360)-180;
-  // 各AIトラックを最寄りの実況台風に割り当て
+  // 各AIトラックを実況台風に割り当て(シード由来=台風番号で直結、それ以外=距離照合)
   const assigned=[];
   for(const m of tyAiData.members){
     for(const tr of m.tracks){
       const p0=tr.pts[0], la=p0[1], lo=to180(p0[0]);
-      let best=null,bd=1e9;
-      for(const s of storms){ const d=tyGcKm(la,lo,s.lat,s.lon); if(d<bd){bd=d;best=s;} }
-      const key = (best&&bd<700) ? `台風${Number(best.num)}号 ${best.name}` : '(照合なし)';
+      let key='(照合なし)';
+      const jm=/^jma(\d{4})/.exec(String(tr.id||''));
+      if(jm){
+        const s=storms.find(x=>x.num===jm[1]);
+        key=`台風${Number(jm[1].slice(2))}号${s&&s.name?(' '+s.name):''}`;
+      }else{
+        let best=null,bd=1e9;
+        for(const s of storms){ const d=tyGcKm(la,lo,s.lat,s.lon); if(d<bd){bd=d;best=s;} }
+        if(best&&bd<700) key=`台風${Number(best.num)}号 ${best.name}`;
+      }
       if(!(key in stormCol)){ const i=Object.keys(stormCol).length;
         stormCol[key]=key==='(照合なし)'?'#9aa5b1':TY_AI_STORMCOL[i%TY_AI_STORMCOL.length]; stormPts[key]=[]; }
       stormPts[key].push([lo,la]);
