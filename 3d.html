@@ -2206,16 +2206,17 @@ async function drawTyAi(){
       assigned.push({m:m.member,tr,key});
     }
   }
-  // 描画
+  // 描画: 照合済み=太く鮮やか＋名前、未照合(気象庁の命名台風と結びつかない弱い系)=細く薄く
   for(const a of assigned){
+    const matched = a.key!=='(照合なし)';
     const col=Cesium.Color.fromCssColorString(stormCol[a.key]);
     const deg=[]; for(const p of a.tr.pts){ deg.push(p[0],p[1]); }
-    let wmax=0,wpt=a.tr.pts[0]; for(const p of a.tr.pts){ if(p[3]!=null&&p[3]>wmax){wmax=p[3];wpt=p;} }
+    let wmax=0; for(const p of a.tr.pts){ if(p[3]!=null&&p[3]>wmax){wmax=p[3];} }
     tyAiSrc.entities.add({ polyline:{ positions:Cesium.Cartesian3.fromDegreesArray(deg),
-      width:2.2, material:col.withAlpha(0.9), clampToGround:false },
-      description:`<div style="font-size:13px"><b>${a.key} のAI予測</b>（member${a.m}）<br>`+
+      width:matched?2.6:1.2, material:col.withAlpha(matched?0.92:0.4), clampToGround:false },
+      description:`<div style="font-size:13px"><b>${matched?(a.key+' のAI予測'):'AI予測(気象庁の命名台風に未対応の系)'}</b>（member${a.m}）<br>`+
         `${tyAiData.model} ／ 最大風速 ${wmax}kt<br>初期時刻 ${tyAiData.init}<br>${tyAiData.source}</div>` });
-    tyAiSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(a.tr.pts[0][0],a.tr.pts[0][1]),
+    if(matched) tyAiSrc.entities.add({ position:Cesium.Cartesian3.fromDegrees(a.tr.pts[0][0],a.tr.pts[0][1]),
       point:{ pixelSize:6, color:col, outlineColor:Cesium.Color.WHITE, outlineWidth:1 } });
   }
   // 台風名ラベルを1台風につき1つ(AI予測群の平均位置)
