@@ -27,7 +27,14 @@ API = 'https://www.googleapis.com/youtube/v3/'
 KEY = os.environ.get('YOUTUBE_API_KEY', '').strip()
 UA = {'User-Agent': 'nihon-livemap/2.0 (+https://air.aiblockchainnexuslab.tech)'}
 DISCOVER_QUERIES = ['ライブカメラ', 'ライブ配信 カメラ 24時間', '定点カメラ ライブ', '河川 ライブカメラ', '駅前 ライブカメラ',
-                    '空港 ライブ カメラ', '港 ライブカメラ', '富士山 ライブカメラ', '桜島 ライブ', '雪 ライブカメラ 道路']
+                    '空港 ライブ カメラ', '港 ライブカメラ', '富士山 ライブカメラ', '桜島 ライブ', '雪 ライブカメラ 道路',
+                    # 世界(観光地)
+                    'live cam', 'webcam live', 'live cam beach', 'live cam city skyline', 'live cam harbor', 'live cam square',
+                    'Paris live cam', 'London live cam', 'New York live cam', 'Venice live cam', 'Rome live cam', 'Barcelona live cam',
+                    'Dubai live cam', 'Sydney live cam', 'Hawaii live cam', 'Alps live cam', 'Iceland live cam', 'safari live cam',
+                    'Seoul live cam', 'Taipei live cam', 'Bangkok live cam', 'Hong Kong live cam', 'Singapore live cam', 'Bali live cam',
+                    'Machu Picchu live', 'Rio de Janeiro live cam', 'Norway live cam', 'Alaska live cam', 'Yellowstone live cam',
+                    'Grand Canyon live', 'Niagara Falls live', 'Times Square live', 'zoo live cam', 'aquarium live cam']
 DISCOVER_PER_RUN = 2  # 1回の実行で回す検索クエリ数(100unit×2)。ラウンドロビン
 
 def get(url, timeout=30):
@@ -122,9 +129,11 @@ def main():
             n = title or s.get('n'); p = prev_by_id.get(s['id'], {})
             if s['id'] in found_new:
                 v, n = found_new[s['id']][0], (found_new[s['id']][1] or n); live = True; missing = False
+            if live is None:  # API失敗(クォータ超過等)時は前回値を維持
+                live = p.get('live'); n = p.get('n') or n; missing = False
             last = now if live else (p.get('last') or s.get('last') or '')
             gone = bool(missing) and not live  # 動画が削除/非公開で、新しい配信も見つからない
-            items.append({**s, 'n': n, 'v': v, 'live': bool(live), 'last': last, 'gone': gone})
+            items.append({**s, 'n': n, 'v': v, 'live': live, 'last': last, 'gone': gone})
         # 新規発見(少数)。位置未確定なので pending へ
         pend = load_json(PENDING, {'q_idx': 0, 'items': {}})
         known_ch = {s.get('ch') for s in seed_items}

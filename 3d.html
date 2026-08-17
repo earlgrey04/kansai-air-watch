@@ -158,7 +158,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63.6-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v64-worldcam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -3030,8 +3030,10 @@ const CAM_KIND={ yt:['▶️','YouTube配信','#ff3b30'], river:['🏞️','河�
   snow:['❄️','雪・峠','#e0f2fe'], other:['📷','その他','#d4d4d8'] };
 function camKindOf(c){ return CAM_KIND[c.k]?c.k:'other'; }
 function camColor(c){ if(c.k==='yt' && c.live===false) return '#7a5a5a'; if(c.k!=='yt' && camIsStale(c)) return '#6b6f7a'; return CAM_KIND[camKindOf(c)][2]; }
+function camIsWorld(c){ return c.k==='yt' && c.cc && c.cc!=='JP'; }
 function camVisible(c){
-  if(camFilter && camFilter!==camKindOf(c)) return false;
+  if(camFilter==='world'){ if(!camIsWorld(c)) return false; }
+  else if(camFilter && camFilter!==camKindOf(c)) return false;
   if(camLiveOnly && c.k==='yt' && c.live!==true) return false;
   return true;
 }
@@ -3087,13 +3089,13 @@ function camBuild(){
   }
   camSrc.entities.resumeEvents();
   // 内訳(フィルタに関係なく全体)
-  const yts=(camYt||[]).filter(c=>!c.gone), nyt=yts.length, ytOn=yts.filter(c=>c.live===true).length, ytOff=yts.filter(c=>c.live===false).length;
+  const yts=(camYt||[]).filter(c=>!c.gone), nyt=yts.length, ytOn=yts.filter(c=>c.live===true).length, ytOff=yts.filter(c=>c.live===false).length, ytWorld=yts.filter(camIsWorld).length;
   const imgs=camData||[], nimg=imgs.length, byK={}; let stale=0, fresh1h=0;
   for(const c of imgs){ const k=camKindOf(c); byK[k]=(byK[k]||0)+1; if(camIsStale(c)) stale++; else { const st=camStOf(c); if(st&&st.lm&&(camSt.chk-st.lm)<3600) fresh1h++; } }
   const kindTxt=Object.keys(CAM_KIND).filter(k=>k!=='yt'&&byK[k]).map(k=>CAM_KIND[k][0]+CAM_KIND[k][1]+' '+byK[k].toLocaleString()).join('・');
   document.getElementById('cnt').textContent=shown.toLocaleString()+' 台';
   document.getElementById('upd').innerHTML=`表示中 ${shown.toLocaleString()} 台 ／ 全 ${(nyt+nimg).toLocaleString()} 台の内訳:<br>`+
-    `▶️YouTube配信 ${nyt.toLocaleString()}（🔴配信中 ${ytOn.toLocaleString()}・⚫停止中 ${ytOff.toLocaleString()}${(nyt-ytOn-ytOff)>0?'・未確認 '+(nyt-ytOn-ytOff).toLocaleString():''}）<br>`+
+    `▶️YouTube配信 ${nyt.toLocaleString()}（🔴配信中 ${ytOn.toLocaleString()}・⚫停止中 ${ytOff.toLocaleString()}${(nyt-ytOn-ytOff)>0?'・未確認 '+(nyt-ytOn-ytOff).toLocaleString():''}${ytWorld?'・うち🌍海外 '+ytWorld.toLocaleString():''}）<br>`+
     `📷公的静止画 ${nimg.toLocaleString()}（${kindTxt}）`+(camSt?`<br>　1時間以内に更新 ${fresh1h.toLocaleString()}・更新停止/取得不可 ${stale.toLocaleString()}（${camAgo(Date.now()/1000-camSt.chk)}に確認）`:'')+
     `<br><span style="color:#5f7fa6">点をクリックで映像・種別ボタンで絞り込み</span>`;
   viewer.scene.requestRender();
@@ -3102,6 +3104,7 @@ function camSetFilter(k){
   camFilter=(camFilter===k)?null:k;
   document.querySelectorAll('#modebar button[data-k]').forEach(b=>b.classList.toggle('on', b.dataset.k===(camFilter||'all')));
   camBuild();
+  if(camFilter==='world') viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(20,25,2.6e7), duration:1.8 }); // 世界全体へ引く
 }
 function camToggleLive(){
   camLiveOnly=!camLiveOnly;
@@ -3154,6 +3157,7 @@ function camShow(c){
   document.getElementById('camTitle').textContent=c.n;
   const meta=[];
   meta.push(kind[0]+' '+kind[1]);
+  if(camIsWorld(c)) meta.push('🌍 '+camEsc(c.cc)+(c.place?' '+camEsc(c.place):''));
   if(c.k==='yt'){ meta.push(c.live===true?'🔴 配信中':(c.live===false?'⚫ 配信停止中(最後の配信 '+(c.last?c.last.slice(0,10):'不明')+')':'配信状態 未確認')); if(c.conf&&c.conf!=='high') meta.push('<span style="color:#ffcf7a">位置は概略('+(c.conf==='mid'?'市区町村':'都道府県')+'レベル)</span>'); }
   if(c.s) meta.push(camEsc(c.s));
   if(c.g) meta.push('<span style="color:#ffcf7a">位置は地名からの推定(誤差あり)</span>');
@@ -3227,6 +3231,7 @@ async function setCameras(){
   if(mb){
     mb.innerHTML='<button data-k="all" class="on" onclick="camSetFilter(null)">全て</button>'+
       Object.keys(CAM_KIND).map(k=>`<button data-k="${k}" onclick="camSetFilter('${k}')">${CAM_KIND[k][0]}${CAM_KIND[k][1]}</button>`).join('')+
+      `<button data-k="world" onclick="camSetFilter('world')">🌍海外</button>`+
       `<button data-f="live" class="${camLiveOnly?'on':''}" onclick="camToggleLive()">🔴配信中のみ</button>`;
     mb.style.display='flex';
   }
