@@ -102,6 +102,23 @@
   .zai-row b { font-size:11.5px; }
   .zai-row .tx { color:#c9d6e5; font-size:10.5px; word-break:break-all; }
 
+  /* ライブカメラの映像パネル */
+  #camPanel { display:none; position:absolute; right:10px; bottom:44px; z-index:12; width:380px; max-width:calc(100vw - 20px);
+    background:rgba(10,30,50,.94); color:#dfeaff; border:1px solid #29496b; border-radius:10px; padding:8px 10px 8px;
+    font:11.5px/1.5 system-ui,sans-serif; box-shadow:0 4px 18px rgba(0,0,0,.45); }
+  #camPanel .ttl { font-size:13px; font-weight:700; color:#fff; padding-right:52px; word-break:break-all; }
+  #camPanel .hd { font-size:10.5px; color:#9fb8d6; }
+  #camPanel a { color:#8fc1ee; text-decoration:none; }
+  #camPanel .x { position:absolute; right:8px; top:6px; background:none; border:none; color:#cfe0f5; font-size:18px; cursor:pointer; padding:0 4px; }
+  #camPanel .zm { position:absolute; right:32px; top:8px; background:none; border:none; color:#cfe0f5; font-size:14px; cursor:pointer; padding:0 4px; }
+  #camMedia { margin:6px 0 4px; background:#000; border-radius:6px; overflow:hidden; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; }
+  #camMedia iframe { width:100%; height:100%; border:0; display:block; }
+  #camMedia img { width:100%; height:100%; object-fit:contain; display:block; }
+  #camImgErr { padding:10px; color:#ffb4a8; font-size:11px; text-align:center; }
+  #camNote { font-size:9.5px; color:#7f98b8; margin-top:4px; line-height:1.4; }
+  @media (max-width: 700px) {
+    #camPanel { right:6px; left:6px; bottom:96px; width:auto; padding:6px 8px; font-size:10.5px; }
+  }
   /* ===== モバイル調整(新設パネル・凡例類) ===== */
   @media (max-width: 700px) {
     #hud { top: 208px; max-width: 62vw; font-size: 10px; line-height: 1.3; padding: 5px 8px; }
@@ -122,7 +139,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v61-train-location</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v62-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -141,6 +158,7 @@
   <button id="bShink" onclick="setShinkansen()">🚄 新幹線</button>
   <button id="bZai" onclick="setZairaisen()">🚆 在来線</button>
   <button id="bHwy" onclick="setHighway()">🛣️ 高速道路</button>
+  <button id="bCam" onclick="setCameras()">📹 ライブカメラ</button>
   <button id="bTsu" onclick="toggleTsunami()">🌊 津波</button>
   <button id="bPress" onclick="togglePressure()">🌐 気圧</button>
   <button id="bTy" onclick="setTyphoon()">🌀 台風</button>
@@ -182,6 +200,16 @@
   <div id="hwyList"></div>
   <span class="hd">⛔通行止 🔴渋滞 🟠混雑 🟡規制 ／ 行クリックで移動<br>
   出典: <a href="https://www.jartic.or.jp/" target="_blank" rel="noopener">JARTIC(日本道路交通情報センター)</a>・経路 国土数値情報N06・オービス © OpenStreetMap contributors</span>
+</div>
+<div id="camPanel">
+  <button class="x" onclick="camClose()" title="閉じる">✕</button>
+  <button class="zm" onclick="camZoomTo()" title="この地点へズーム">🔍</button>
+  <div class="ttl" id="camTitle"></div>
+  <div class="hd" id="camMeta"></div>
+  <div id="camMedia"></div>
+  <div class="hd"><span id="camLinks"></span> <span id="camTime" style="float:right"></span></div>
+  <div id="camNote">映像は各配信元(YouTube公式埋め込み／各機関の公開画像)を直接表示しています。著作権は各配信元に帰属。
+  一覧の出典: YouTube配信=<a href="https://tomarigi.me/" target="_blank" rel="noopener">とまり木</a>／静止画=国土交通省 各地方整備局・北海道開発局、気象庁、海上保安庁、各県の河川・道路情報サイト(公共データ利用規約等に基づく)。掲載に問題があればお知らせください。</div>
 </div>
 <div id="tsuLegend3">
   <span class="hd">津波情報(気象庁)</span><br>
@@ -429,6 +457,7 @@ function clearNewModes(){
   if(hwyOrbisSrc){ try{ viewer.dataSources.remove(hwyOrbisSrc,true); }catch(_){} hwyOrbisSrc=null; }
   if(hwyTimer){ try{ clearInterval(hwyTimer); }catch(_){} hwyTimer=null; }
   { const hp=document.getElementById('hwyPanel'); if(hp) hp.style.display='none'; }
+  try{ camOff(); }catch(_){}
   if(zaiShinkSrc){ try{ viewer.dataSources.remove(zaiShinkSrc,true); }catch(_){} zaiShinkSrc=null; }
   { const zp=document.getElementById('zaiPanel'); if(zp) zp.style.display='none'; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
@@ -2956,6 +2985,200 @@ function setHistEq(){
   }).catch(e=>setErr('地震データの取得失敗: '+(e&&e.message||e)));
 }
 
+
+// ===== 📹 ライブカメラ（全国：YouTube配信＋公的機関の静止画カメラ）=====
+// データ: cameras.json(静止画カメラ・リポジトリ同梱、build_cameras.py生成) と
+//         cameras_yt.json(YouTube配信・statusブランチ、6時間毎更新。配信中フラグと現在のvideo_id)
+var camChCount={}, camSrc=null, camData=null, camYt=null, camTimer=null, camCur=null, camFilter=null, camLiveOnly=false, camMode=false;
+const CAM_YT_URL='https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/cameras_yt.json';
+const CAM_KIND={ yt:['▶️','YouTube配信','#ff3b30'], river:['🏞️','河川','#3b9dff'], dam:['🏗️','ダム','#22c1c3'],
+  road:['🛣️','道路','#ffb020'], volcano:['🌋','火山','#c084fc'], coast:['🌊','海岸・港','#2dd4bf'],
+  snow:['❄️','雪・峠','#e0f2fe'], other:['📷','その他','#d4d4d8'] };
+function camKindOf(c){ return CAM_KIND[c.k]?c.k:'other'; }
+function camColor(c){ if(c.k==='yt' && c.live===false) return '#7a5a5a'; return CAM_KIND[camKindOf(c)][2]; }
+function camVisible(c){
+  if(camFilter && camFilter!==camKindOf(c)) return false;
+  if(camLiveOnly && c.k==='yt' && c.live===false) return false;
+  return true;
+}
+function camOff(){
+  camMode=false;
+  if(camSrc){ try{ viewer.dataSources.remove(camSrc,true); }catch(_){} camSrc=null; }
+  if(camTimer){ clearInterval(camTimer); camTimer=null; }
+  camCur=null;
+  const p=document.getElementById('camPanel'); if(p){ p.style.display='none'; }
+  const m=document.getElementById('camMedia'); if(m) m.innerHTML='';
+}
+async function camLoadData(){
+  const jobs=[];
+  if(!camData) jobs.push(fetch('cameras.json').then(r=>r.json()).then(d=>{ camData=d.items||d; }));
+  if(!camYt) jobs.push(fetch(CAM_YT_URL+'?t='+Math.floor(Date.now()/600000),{cache:'no-store'}).then(r=>r.ok?r.json():null)
+    .then(d=>{ camYt=(d&&(d.items||d))||[]; }).catch(()=>{ camYt=[]; }));
+  await Promise.all(jobs);
+  camChCount={}; for(const c of (camYt||[])){ if(c.ch) camChCount[c.ch]=(camChCount[c.ch]||0)+1; }
+}
+function camBuild(){
+  if(!camSrc){
+    camSrc=new Cesium.CustomDataSource('cams'); viewer.dataSources.add(camSrc);
+    camSrc.clustering.enabled=true; camSrc.clustering.pixelRange=26; camSrc.clustering.minimumClusterSize=4;
+    camSrc.clustering.clusterEvent.addEventListener((ents,cluster)=>{
+      cluster.label.show=true; cluster.label.text=String(ents.length);
+      cluster.label.font='bold 12px sans-serif'; cluster.label.fillColor=Cesium.Color.WHITE;
+      cluster.label.style=Cesium.LabelStyle.FILL_AND_OUTLINE; cluster.label.outlineWidth=3; cluster.label.outlineColor=Cesium.Color.BLACK;
+      cluster.label.pixelOffset=new Cesium.Cartesian2(0,-1); cluster.label.horizontalOrigin=Cesium.HorizontalOrigin.CENTER; cluster.label.verticalOrigin=Cesium.VerticalOrigin.CENTER;
+      cluster.point.show=true; cluster.point.pixelSize=Math.min(34,16+Math.sqrt(ents.length)*2.2);
+      cluster.point.color=Cesium.Color.fromCssColorString('#e8562a').withAlpha(0.85);
+      cluster.point.outlineColor=Cesium.Color.WHITE; cluster.point.outlineWidth=1.5;
+    });
+  }
+  camSrc.entities.suspendEvents();
+  camSrc.entities.removeAll();
+  const all=[].concat(camYt||[], camData||[]);
+  let shown=0, ytLive=0;
+  for(const c of all){
+    if(!(c.la&&c.lo)) continue;
+    const vis=camVisible(c); if(!vis) continue;
+    shown++; if(c.k==='yt'&&c.live) ytLive++;
+    camSrc.entities.add({
+      position:Cesium.Cartesian3.fromDegrees(c.lo,c.la,60),
+      point:{ pixelSize:7, color:Cesium.Color.fromCssColorString(camColor(c)), outlineColor:Cesium.Color.BLACK, outlineWidth:1,
+              disableDepthTestDistance:Number.POSITIVE_INFINITY },
+      label:{ text:c.n, font:'11px sans-serif', pixelOffset:new Cesium.Cartesian2(0,-13),
+              fillColor:Cesium.Color.WHITE, style:Cesium.LabelStyle.FILL_AND_OUTLINE, outlineWidth:3, outlineColor:Cesium.Color.BLACK,
+              distanceDisplayCondition:new Cesium.DistanceDisplayCondition(0, 60000), disableDepthTestDistance:Number.POSITIVE_INFINITY },
+      properties:{ cam:c },
+    });
+  }
+  camSrc.entities.resumeEvents();
+  const nyt=(camYt||[]).length, nimg=(camData||[]).length;
+  document.getElementById('cnt').textContent=shown.toLocaleString()+' 台';
+  document.getElementById('upd').textContent=`ライブカメラ ${shown.toLocaleString()} 台を表示中（YouTube配信 ${nyt.toLocaleString()}・うち配信中 ${ytLive.toLocaleString()} ／ 公的静止画カメラ ${nimg.toLocaleString()}）点をクリックで映像`;
+  viewer.scene.requestRender();
+}
+function camSetFilter(k){
+  camFilter=(camFilter===k)?null:k;
+  document.querySelectorAll('#modebar button[data-k]').forEach(b=>b.classList.toggle('on', b.dataset.k===(camFilter||'all')));
+  camBuild();
+}
+function camToggleLive(){
+  camLiveOnly=!camLiveOnly;
+  const b=document.querySelector('#modebar button[data-f="live"]'); if(b) b.classList.toggle('on',camLiveOnly);
+  camBuild();
+}
+function camEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function camImgUrl(c){
+  if(c.cb===false) return c.i;
+  return c.i+(c.i.includes('?')?'&':'?')+'_t='+Date.now();
+}
+// 時刻スロット型(ファイル名が観測時刻): JSTで now-lag分 を step分でfloor。404なら1つ前のスロットへ(最大4回)
+function camSlotUrl(tpl, back, step, lag){
+  step=step||5; lag=(lag!=null)?lag:4;
+  const d=new Date(Date.now()+9*3600e3-lag*60e3-(back||0)*step*60e3);
+  const p=n=>String(n).padStart(2,'0');
+  const m=Math.floor(d.getUTCMinutes()/step)*step;
+  const ymd=d.getUTCFullYear()+p(d.getUTCMonth()+1)+p(d.getUTCDate()), hm=p(d.getUTCHours())+p(m);
+  return tpl.replace('{YYYYMMDDHHMM}',ymd+hm).replace('{YYYYMMDD}',ymd).replace('{HHMM}',hm).replace('{mm10}',p(m));
+}
+var camSlotBack=0;
+async function camResolveUrl(c){
+  const d=c.d;
+  if(!d) return camImgUrl(c);
+  if(d.t==='slot'){ return camSlotUrl(d.tpl, camSlotBack, d.step, d.lag); }
+  if(d.t==='re'){ // 一覧HTML(CORS可)を取り、正規表現で最新ファイル名を得る(気象庁火山カメラ等)
+    try{
+      const html=await (await fetch(d.u,{cache:'no-store'})).text();
+      const m=html.match(new RegExp(d.re));
+      if(m&&m[1]) return d.b+m[1];
+    }catch(_){}
+    return c.i?camImgUrl(c):'';
+  }
+  return camImgUrl(c);
+}
+async function camRefreshImg(){
+  const img=document.getElementById('camImg'); if(!img||!camCur||camCur.k==='yt') return;
+  const cur=camCur;
+  const u=await camResolveUrl(cur);
+  if(camCur!==cur) return;
+  if(!u){ img.onerror&&img.onerror(); return; }
+  img.src=u;
+  const t=document.getElementById('camTime'); if(t) t.textContent='取得 '+new Date().toLocaleTimeString('ja-JP');
+}
+function camShow(c){
+  camCur=c;
+  if(camTimer){ clearInterval(camTimer); camTimer=null; }
+  const p=document.getElementById('camPanel'), m=document.getElementById('camMedia');
+  const kind=CAM_KIND[camKindOf(c)];
+  document.getElementById('camTitle').textContent=c.n;
+  const meta=[];
+  meta.push(kind[0]+' '+kind[1]);
+  if(c.k==='yt'){ meta.push(c.live?'🔴 配信中':'⚫ 配信停止中(最後の配信 '+(c.last?c.last.slice(0,10):'不明')+')'); }
+  if(c.s) meta.push(camEsc(c.s));
+  if(c.g) meta.push('<span style="color:#ffcf7a">位置は地名からの推定(誤差あり)</span>');
+  if(c.stale) meta.push('<span style="color:#ffb4a8">更新停止中の可能性</span>');
+  document.getElementById('camMeta').innerHTML=meta.join(' ／ ');
+  let links='';
+  if(c.p) links+=`<a href="${camEsc(c.p)}" target="_blank" rel="noopener">出典ページを開く ↗</a>`;
+  if(c.k==='yt'){
+    const v=c.v?`https://www.youtube.com/watch?v=${camEsc(c.v)}`:`https://www.youtube.com/channel/${camEsc(c.ch)}/live`;
+    links=`<a href="${v}" target="_blank" rel="noopener">YouTubeで開く ↗</a>`+(c.ch?` ・ <a href="https://www.youtube.com/channel/${camEsc(c.ch)}" target="_blank" rel="noopener">チャンネル</a>`:'');
+  }
+  document.getElementById('camLinks').innerHTML=links;
+  if(c.k==='yt'){
+    // 1チャンネル1カメラなら channel 指定(常に現在の配信を指す)。複数カメラを同一チャンネルで流している所は video_id で特定
+    const single=c.ch && camChCount[c.ch]===1;
+    const src=(single||!c.v)?`https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(c.ch)}&autoplay=1&mute=1&playsinline=1`
+                 :`https://www.youtube.com/embed/${encodeURIComponent(c.v)}?autoplay=1&mute=1&playsinline=1&rel=0`;
+    m.innerHTML=`<iframe src="${src}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+    document.getElementById('camTime').textContent='';
+  }else{
+    m.innerHTML=`<img id="camImg" alt="" referrerpolicy="no-referrer">`+
+      `<div id="camImgErr" style="display:none">画像を直接表示できませんでした（配信元の設定により外部表示不可の場合があります）。<br>上の「出典ページを開く」から配信元でご覧ください。</div>`;
+    const img=document.getElementById('camImg');
+    camSlotBack=0;
+    img.onerror=()=>{
+      if(c.d&&c.d.t==='slot'&&camSlotBack<4){ camSlotBack++; camRefreshImg(); return; } // 直近スロット未生成→1つ前へ
+      img.style.display='none'; const e=document.getElementById('camImgErr'); if(e) e.style.display='block'; };
+    img.onload=()=>{ img.style.display='block'; const e=document.getElementById('camImgErr'); if(e) e.style.display='none'; };
+    camRefreshImg();
+    camTimer=setInterval(camRefreshImg, Math.max(20,(c.t||60))*1000);
+  }
+  p.style.display='block';
+}
+function camClose(){ camCur=null; if(camTimer){ clearInterval(camTimer); camTimer=null; } const p=document.getElementById('camPanel'); if(p)p.style.display='none'; const m=document.getElementById('camMedia'); if(m)m.innerHTML=''; }
+function camZoomTo(){ if(!camCur) return; viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(camCur.lo,camCur.la-0.02,3200), orientation:{heading:0,pitch:Cesium.Math.toRadians(-45),roll:0}, duration:1.2 }); }
+// 点クリック→infoBoxではなく専用パネルで映像を出す
+var camSelGuard=false;
+viewer.selectedEntityChanged.addEventListener(function(ent){
+  if(camSelGuard) return;
+  if(!camMode || !ent || !ent.properties || !ent.properties.cam) return;
+  const c=ent.properties.cam.getValue ? ent.properties.cam.getValue(Cesium.JulianDate.now()) : ent.properties.cam;
+  camSelGuard=true; try{ viewer.selectedEntity=undefined; }finally{ camSelGuard=false; }
+  camShow(c);
+});
+async function setCameras(){
+  { const btn=document.getElementById('bCam'); if(btn && btn.classList.contains('on')){ setLive(); return; } }
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto='esri'; refreshPhotoButtons();
+  const btn=document.getElementById('bCam'); if(btn)btn.classList.add('on');
+  setModeLbl('ライブカメラ'); clearStarlink(); setBasemap('dark');
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  camMode=true; camFilter=null;
+  const mb=document.getElementById('modebar');
+  if(mb){
+    mb.innerHTML='<button data-k="all" class="on" onclick="camSetFilter(null)">全て</button>'+
+      Object.keys(CAM_KIND).map(k=>`<button data-k="${k}" onclick="camSetFilter('${k}')">${CAM_KIND[k][0]}${CAM_KIND[k][1]}</button>`).join('')+
+      `<button data-f="live" class="${camLiveOnly?'on':''}" onclick="camToggleLive()">🔴配信中のみ</button>`;
+    mb.style.display='flex';
+  }
+  setErr('ライブカメラ一覧を読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(137.2,33.0,2.35e6),
+    orientation:{heading:0,pitch:Cesium.Math.toRadians(-72),roll:0}, duration:1.5 });
+  try{ await camLoadData(); if(!camMode) return; camBuild(); setErr(null); }
+  catch(e){ setErr('ライブカメラ一覧の取得失敗: '+(e&&e.message||e)); }
+}
 
 // カメラをコピー（cキー）＝今の視点コードをクリップボードへ。動画に完全一致で反映できる
 window.addEventListener('keydown', function(e){
