@@ -116,6 +116,8 @@
   #camMedia img { width:100%; height:100%; object-fit:contain; display:block; }
   #camImgErr { padding:10px; color:#ffb4a8; font-size:11px; text-align:center; }
   #camNote { font-size:9.5px; color:#7f98b8; margin-top:4px; line-height:1.4; }
+  #camReload { font:10.5px sans-serif; padding:2px 8px; border:none; border-radius:6px; background:#2563eb; color:#fff; cursor:pointer; margin-right:6px; }
+  #camReload:active { background:#1d4ed8; }
   @media (max-width: 700px) {
     #camPanel { right:6px; left:6px; bottom:96px; width:auto; padding:6px 8px; font-size:10.5px; }
   }
@@ -139,7 +141,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v62-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -207,7 +209,7 @@
   <div class="ttl" id="camTitle"></div>
   <div class="hd" id="camMeta"></div>
   <div id="camMedia"></div>
-  <div class="hd"><span id="camLinks"></span> <span id="camTime" style="float:right"></span></div>
+  <div class="hd"><span id="camLinks"></span> <span style="float:right"><button id="camReload" onclick="camReloadNow()" title="最新の画像を取得し直す">🔄 更新</button> <span id="camTime"></span></span></div>
   <div id="camNote">映像は各配信元(YouTube公式埋め込み／各機関の公開画像)を直接表示しています。著作権は各配信元に帰属。
   一覧の出典: YouTube配信=YouTube Data API で収集した各配信者の公開ライブ(位置は当サイトで独自に特定。配信の発見にあたり <a href="https://tomarigi.me/" target="_blank" rel="noopener">とまり木</a> を参考にしました)／静止画=国土交通省 各地方整備局・北海道開発局、気象庁、海上保安庁、各県の河川・道路情報サイト(公共データ利用規約等に基づく)。掲載に問題があればお知らせください。</div>
 </div>
@@ -2989,13 +2991,27 @@ function setHistEq(){
 // ===== 📹 ライブカメラ（全国：YouTube配信＋公的機関の静止画カメラ）=====
 // データ: cameras.json(静止画カメラ・リポジトリ同梱、build_cameras.py生成) と
 //         cameras_yt.json(YouTube配信・statusブランチ、6時間毎更新。配信中フラグと現在のvideo_id)
-var camChCount={}, camSrc=null, camData=null, camYt=null, camTimer=null, camCur=null, camFilter=null, camLiveOnly=false, camMode=false;
+var camChCount={}, camSt=null, camSrc=null, camData=null, camYt=null, camTimer=null, camCur=null, camFilter=null, camLiveOnly=false, camMode=false;
 const CAM_YT_URL='https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/cameras_yt.json';
+const CAM_ST_URL='https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/cameras_status.json'; // 静止画の鮮度(3時間毎チェック)
+// md5 (鮮度ファイルのキー = md5(画像URL)[:10])
+function camMd5(str){ function R(x,n){return (x<<n)|(x>>>(32-n));} function C(x,y){const l=(x&0xffff)+(y&0xffff),m=(x>>16)+(y>>16)+(l>>16);return (m<<16)|(l&0xffff);}
+  const K=[],S=[7,12,17,22,5,9,14,20,4,11,16,23,6,10,15,21]; for(let i=0;i<64;i++)K[i]=Math.floor(Math.abs(Math.sin(i+1))*4294967296);
+  const b=unescape(encodeURIComponent(str)), n=b.length, W=[]; for(let i=0;i<n;i++)W[i>>2]|=b.charCodeAt(i)<<((i%4)*8); W[n>>2]|=0x80<<((n%4)*8); W[(((n+8)>>6)<<4)+14]=n*8;
+  let a=1732584193,bb=-271733879,c=-1732584194,d=271733878;
+  for(let i=0;i<W.length;i+=16){ const oa=a,ob=bb,oc=c,od=d;
+    for(let j=0;j<64;j++){ let f,g; if(j<16){f=(bb&c)|(~bb&d);g=j;} else if(j<32){f=(d&bb)|(~d&c);g=(5*j+1)%16;} else if(j<48){f=bb^c^d;g=(3*j+5)%16;} else {f=c^(bb|~d);g=(7*j)%16;}
+      const t=d; d=c; c=bb; bb=C(bb,R(C(C(a,f),C(K[j],W[i+g]|0)),S[(j>>4)*4+(j%4)])); a=t; }
+    a=C(a,oa); bb=C(bb,ob); c=C(c,oc); d=C(d,od); }
+  return [a,bb,c,d].map(x=>{let h='';for(let i=0;i<4;i++)h+=('0'+((x>>(i*8))&255).toString(16)).slice(-2);return h;}).join(''); }
+function camStOf(c){ if(!camSt||!c.i||c.d) return null; const v=camSt.s[camMd5(c.i).slice(0,10)]; return v?{lm:v[0],code:v[1]}:null; }
+function camIsStale(c){ const st=camStOf(c); if(!st) return false; if(st.code&&st.code!==200) return true; if(st.lm&&(camSt.chk-st.lm)>86400) return true; return false; }
+function camAgo(sec){ if(sec<90) return Math.round(sec)+'秒前'; if(sec<5400) return Math.round(sec/60)+'分前'; if(sec<172800) return (sec/3600).toFixed(1).replace(/\.0$/,'')+'時間前'; return Math.round(sec/86400)+'日前'; }
 const CAM_KIND={ yt:['▶️','YouTube配信','#ff3b30'], river:['🏞️','河川','#3b9dff'], dam:['🏗️','ダム','#22c1c3'],
   road:['🛣️','道路','#ffb020'], volcano:['🌋','火山','#c084fc'], coast:['🌊','海岸・港','#2dd4bf'],
   snow:['❄️','雪・峠','#e0f2fe'], other:['📷','その他','#d4d4d8'] };
 function camKindOf(c){ return CAM_KIND[c.k]?c.k:'other'; }
-function camColor(c){ if(c.k==='yt' && c.live===false) return '#7a5a5a'; return CAM_KIND[camKindOf(c)][2]; }
+function camColor(c){ if(c.k==='yt' && c.live===false) return '#7a5a5a'; if(c.k!=='yt' && camIsStale(c)) return '#6b6f7a'; return CAM_KIND[camKindOf(c)][2]; }
 function camVisible(c){
   if(camFilter && camFilter!==camKindOf(c)) return false;
   if(camLiveOnly && c.k==='yt' && c.live!==true) return false;
@@ -3014,6 +3030,7 @@ async function camLoadData(){
   if(!camData) jobs.push(fetch('cameras.json').then(r=>r.json()).then(d=>{ camData=d.items||d; }));
   if(!camYt) jobs.push(fetch(CAM_YT_URL+'?t='+Math.floor(Date.now()/600000),{cache:'no-store'}).then(r=>r.ok?r.json():null)
     .then(d=>{ camYt=(d&&(d.items||d))||[]; }).catch(()=>{ camYt=[]; }));
+  jobs.push(fetch(CAM_ST_URL+'?t='+Math.floor(Date.now()/600000),{cache:'no-store'}).then(r=>r.ok?r.json():null).then(d=>{ camSt=d; }).catch(()=>{ camSt=null; }));
   await Promise.all(jobs);
   camChCount={}; for(const c of (camYt||[])){ if(c.ch) camChCount[c.ch]=(camChCount[c.ch]||0)+1; }
 }
@@ -3115,6 +3132,11 @@ function camShow(c){
   if(c.k==='yt'){ meta.push(c.live===true?'🔴 配信中':(c.live===false?'⚫ 配信停止中(最後の配信 '+(c.last?c.last.slice(0,10):'不明')+')':'配信状態 未確認')); if(c.conf&&c.conf!=='high') meta.push('<span style="color:#ffcf7a">位置は概略('+(c.conf==='mid'?'市区町村':'都道府県')+'レベル)</span>'); }
   if(c.s) meta.push(camEsc(c.s));
   if(c.g) meta.push('<span style="color:#ffcf7a">位置は地名からの推定(誤差あり)</span>');
+  if(c.k!=='yt'){ const st=camStOf(c); const now=Date.now()/1000;
+    if(st){ if(st.code&&st.code!==200) meta.push('<span style="color:#ffb4a8">配信元の画像を取得できません(HTTP '+st.code+'、'+camAgo(now-camSt.chk)+'に確認)</span>');
+      else if(st.lm){ const age=camSt.chk-st.lm; meta.push('<span style="color:'+(age>86400?'#ffb4a8':(age>3600?'#ffcf7a':'#9be7a3'))+'">配信元の最終更新 '+camAgo(now-st.lm)+(age>86400?'(更新停止の可能性)':'')+'</span> <span style="color:#7f98b8">('+camAgo(now-camSt.chk)+'に確認)</span>'); }
+      else meta.push('<span style="color:#9fb8d6">更新時刻は配信元が非公開('+camAgo(now-camSt.chk)+'に取得可を確認)</span>'); }
+    else if(c.d) meta.push('<span style="color:#9fb8d6">画像URLを時刻から生成(表示時刻=撮影時刻の目安)</span>'); }
   if(c.stale) meta.push('<span style="color:#ffb4a8">更新停止中の可能性</span>');
   document.getElementById('camMeta').innerHTML=meta.join(' ／ ');
   let links='';
@@ -3144,6 +3166,13 @@ function camShow(c){
     camTimer=setInterval(camRefreshImg, Math.max(20,(c.t||60))*1000);
   }
   p.style.display='block';
+}
+function camReloadNow(){
+  if(!camCur) return;
+  if(camCur.k==='yt'){ const f=document.querySelector('#camMedia iframe'); if(f){ const u=f.src; f.src='about:blank'; setTimeout(()=>{ f.src=u; },50); } return; }
+  camSlotBack=0; const img=document.getElementById('camImg'); if(img){ img.style.display='block'; const e=document.getElementById('camImgErr'); if(e) e.style.display='none'; }
+  const t=document.getElementById('camTime'); if(t) t.textContent='取得中…';
+  camRefreshImg();
 }
 function camClose(){ camCur=null; if(camTimer){ clearInterval(camTimer); camTimer=null; } const p=document.getElementById('camPanel'); if(p)p.style.display='none'; const m=document.getElementById('camMedia'); if(m)m.innerHTML=''; }
 function camZoomTo(){ if(!camCur) return; viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(camCur.lo,camCur.la-0.02,3200), orientation:{heading:0,pitch:Cesium.Math.toRadians(-45),roll:0}, duration:1.2 }); }

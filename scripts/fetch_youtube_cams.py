@@ -66,8 +66,7 @@ def video_status(vids):
         for it in d.get('items', []):
             sn = it.get('snippet', {}); ls = it.get('liveStreamingDetails', {})
             live = sn.get('liveBroadcastContent') == 'live' or (bool(ls.get('actualStartTime')) and not ls.get('actualEndTime'))
-            ended = bool(ls.get('actualEndTime')) or (sn.get('liveBroadcastContent') == 'none' and not ls)
-            st[it['id']] = (live, sn.get('title'), sn.get('channelId'), ended)
+            st[it['id']] = (live, sn.get('title'), sn.get('channelId'), False)  # 存在する(終了していても gone ではない)
             found.add(it['id'])
         for v in ch:
             if v not in found: st[v] = (False, None, None, True)  # 削除・非公開
@@ -106,19 +105,26 @@ def main():
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S%z')
     items = []
     if KEY:
-        st = video_status([s['v'] for s in seed_items if s.get('v')])
-        relookup = 0
+        # 前回結果の video_id(新配信に追従済み)を優先して状態確認
+        cur_v = {s['id']: (prev_by_id.get(s['id'], {}).get('v') or s.get('v')) for s in seed_items}
+        st = video_status([v for v in cur_v.values() if v])
+        # 配信中でないチャンネルは同チャンネルの新しい配信を探す(1回あたり上限あり・ラウンドロビン)
+        RELOOKUP_MAX = 200
+        cand = [s for s in seed_items if s.get('ch') and not st.get(cur_v[s['id']], (False,))[0]]
+        rot = int(time.time() // MIN_INTERVAL) % max(1, len(cand)) if cand else 0
+        cand = (cand[rot:] + cand[:rot])[:RELOOKUP_MAX]
+        found_new = {}
+        for s in cand:
+            r = find_channel_live(s['ch'])
+            if r: found_new[s['id']] = r
         for s in seed_items:
-            live, title, chid, ended = st.get(s.get('v'), (None, None, None, False))
-            v = s.get('v'); n = s.get('n')
-            p = prev_by_id.get(s['id'], {})
-            if title: n = title
-            if (not live) and s.get('ch') and relookup < 400:  # 配信が変わった/終わった → 同チャンネルの新しい配信を探す
-                relookup += 1
-                r = find_channel_live(s['ch'])
-                if r: v, n = r[0], (r[1] or n); live = True
+            v = cur_v[s['id']]; live, title, chid, missing = st.get(v, (None, None, None, False))
+            n = title or s.get('n'); p = prev_by_id.get(s['id'], {})
+            if s['id'] in found_new:
+                v, n = found_new[s['id']][0], (found_new[s['id']][1] or n); live = True; missing = False
             last = now if live else (p.get('last') or s.get('last') or '')
-            items.append({**s, 'n': n or s.get('n'), 'v': v, 'live': bool(live), 'last': last, 'gone': bool(ended and not live)})
+            gone = bool(missing) and not live  # 動画が削除/非公開で、新しい配信も見つからない
+            items.append({**s, 'n': n, 'v': v, 'live': bool(live), 'last': last, 'gone': gone})
         # 新規発見(少数)。位置未確定なので pending へ
         pend = load_json(PENDING, {'q_idx': 0, 'items': {}})
         known_ch = {s.get('ch') for s in seed_items}
