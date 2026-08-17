@@ -141,7 +141,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63.1-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63.2-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -3230,6 +3230,15 @@ window.addEventListener('keydown', function(e){
 });
 
 setLive();
+// ディープリンク: ?mode=cam / #cam でライブカメラモードを直接開く(SNS共有用)。?mode=cam&k=river で種別絞り込み
+(function(){
+  try{
+    const q=new URLSearchParams(location.search); const m=q.get('mode')||(location.hash||'').replace('#','');
+    if(m==='cam'||m==='camera'||m==='livecam'){
+      setTimeout(()=>{ setCameras(); const k=q.get('k'); if(k&&CAM_KIND[k]) setTimeout(()=>camSetFilter(k),1500); }, 800);
+    }
+  }catch(_){}
+})();
 </script>
 </body>
 </html>
