@@ -141,7 +141,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63.1-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -3068,9 +3068,16 @@ function camBuild(){
     });
   }
   camSrc.entities.resumeEvents();
-  const nyt=(camYt||[]).filter(c=>!c.gone).length, nimg=(camData||[]).length;
+  // 内訳(フィルタに関係なく全体)
+  const yts=(camYt||[]).filter(c=>!c.gone), nyt=yts.length, ytOn=yts.filter(c=>c.live===true).length, ytOff=yts.filter(c=>c.live===false).length;
+  const imgs=camData||[], nimg=imgs.length, byK={}; let stale=0, fresh1h=0;
+  for(const c of imgs){ const k=camKindOf(c); byK[k]=(byK[k]||0)+1; if(camIsStale(c)) stale++; else { const st=camStOf(c); if(st&&st.lm&&(camSt.chk-st.lm)<3600) fresh1h++; } }
+  const kindTxt=Object.keys(CAM_KIND).filter(k=>k!=='yt'&&byK[k]).map(k=>CAM_KIND[k][0]+CAM_KIND[k][1]+' '+byK[k].toLocaleString()).join('・');
   document.getElementById('cnt').textContent=shown.toLocaleString()+' 台';
-  document.getElementById('upd').textContent=`ライブカメラ ${shown.toLocaleString()} 台を表示中（YouTube配信 ${nyt.toLocaleString()}・うち配信中 ${ytLive.toLocaleString()} ／ 公的静止画カメラ ${nimg.toLocaleString()}）点をクリックで映像`;
+  document.getElementById('upd').innerHTML=`表示中 ${shown.toLocaleString()} 台 ／ 全 ${(nyt+nimg).toLocaleString()} 台の内訳:<br>`+
+    `▶️YouTube配信 ${nyt.toLocaleString()}（🔴配信中 ${ytOn.toLocaleString()}・⚫停止中 ${ytOff.toLocaleString()}${(nyt-ytOn-ytOff)>0?'・未確認 '+(nyt-ytOn-ytOff).toLocaleString():''}）<br>`+
+    `📷公的静止画 ${nimg.toLocaleString()}（${kindTxt}）`+(camSt?`<br>　1時間以内に更新 ${fresh1h.toLocaleString()}・更新停止/取得不可 ${stale.toLocaleString()}（${camAgo(Date.now()/1000-camSt.chk)}に確認）`:'')+
+    `<br><span style="color:#5f7fa6">点をクリックで映像・種別ボタンで絞り込み</span>`;
   viewer.scene.requestRender();
 }
 function camSetFilter(k){
