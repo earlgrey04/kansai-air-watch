@@ -47,7 +47,9 @@ jobs:
           curl -sf --max-time 20 \
             "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/status/cameras_yt.json" \
             -o cameras_yt.json || true
-          timeout 60 python3 scripts/fetch_youtube_cams.py || true
+          timeout 300 python3 scripts/fetch_youtube_cams.py || true
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       - name: push to status branch
         run: |
           mkdir -p /tmp/out && cp shinkansen_status.json /tmp/out/

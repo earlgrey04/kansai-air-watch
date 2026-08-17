@@ -209,7 +209,7 @@
   <div id="camMedia"></div>
   <div class="hd"><span id="camLinks"></span> <span id="camTime" style="float:right"></span></div>
   <div id="camNote">映像は各配信元(YouTube公式埋め込み／各機関の公開画像)を直接表示しています。著作権は各配信元に帰属。
-  一覧の出典: YouTube配信=<a href="https://tomarigi.me/" target="_blank" rel="noopener">とまり木</a>／静止画=国土交通省 各地方整備局・北海道開発局、気象庁、海上保安庁、各県の河川・道路情報サイト(公共データ利用規約等に基づく)。掲載に問題があればお知らせください。</div>
+  一覧の出典: YouTube配信=YouTube Data API で収集した各配信者の公開ライブ(位置は当サイトで独自に特定。配信の発見にあたり <a href="https://tomarigi.me/" target="_blank" rel="noopener">とまり木</a> を参考にしました)／静止画=国土交通省 各地方整備局・北海道開発局、気象庁、海上保安庁、各県の河川・道路情報サイト(公共データ利用規約等に基づく)。掲載に問題があればお知らせください。</div>
 </div>
 <div id="tsuLegend3">
   <span class="hd">津波情報(気象庁)</span><br>
@@ -2998,7 +2998,7 @@ function camKindOf(c){ return CAM_KIND[c.k]?c.k:'other'; }
 function camColor(c){ if(c.k==='yt' && c.live===false) return '#7a5a5a'; return CAM_KIND[camKindOf(c)][2]; }
 function camVisible(c){
   if(camFilter && camFilter!==camKindOf(c)) return false;
-  if(camLiveOnly && c.k==='yt' && c.live===false) return false;
+  if(camLiveOnly && c.k==='yt' && c.live!==true) return false;
   return true;
 }
 function camOff(){
@@ -3037,6 +3037,7 @@ function camBuild(){
   let shown=0, ytLive=0;
   for(const c of all){
     if(!(c.la&&c.lo)) continue;
+    if(c.gone) continue; // 動画が削除/非公開になり、同チャンネルの新しい配信も見つからないもの
     const vis=camVisible(c); if(!vis) continue;
     shown++; if(c.k==='yt'&&c.live) ytLive++;
     camSrc.entities.add({
@@ -3050,7 +3051,7 @@ function camBuild(){
     });
   }
   camSrc.entities.resumeEvents();
-  const nyt=(camYt||[]).length, nimg=(camData||[]).length;
+  const nyt=(camYt||[]).filter(c=>!c.gone).length, nimg=(camData||[]).length;
   document.getElementById('cnt').textContent=shown.toLocaleString()+' 台';
   document.getElementById('upd').textContent=`ライブカメラ ${shown.toLocaleString()} 台を表示中（YouTube配信 ${nyt.toLocaleString()}・うち配信中 ${ytLive.toLocaleString()} ／ 公的静止画カメラ ${nimg.toLocaleString()}）点をクリックで映像`;
   viewer.scene.requestRender();
@@ -3111,7 +3112,7 @@ function camShow(c){
   document.getElementById('camTitle').textContent=c.n;
   const meta=[];
   meta.push(kind[0]+' '+kind[1]);
-  if(c.k==='yt'){ meta.push(c.live?'🔴 配信中':'⚫ 配信停止中(最後の配信 '+(c.last?c.last.slice(0,10):'不明')+')'); }
+  if(c.k==='yt'){ meta.push(c.live===true?'🔴 配信中':(c.live===false?'⚫ 配信停止中(最後の配信 '+(c.last?c.last.slice(0,10):'不明')+')':'配信状態 未確認')); if(c.conf&&c.conf!=='high') meta.push('<span style="color:#ffcf7a">位置は概略('+(c.conf==='mid'?'市区町村':'都道府県')+'レベル)</span>'); }
   if(c.s) meta.push(camEsc(c.s));
   if(c.g) meta.push('<span style="color:#ffcf7a">位置は地名からの推定(誤差あり)</span>');
   if(c.stale) meta.push('<span style="color:#ffb4a8">更新停止中の可能性</span>');
