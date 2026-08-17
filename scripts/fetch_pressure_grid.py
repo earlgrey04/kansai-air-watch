@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Open-Meteo(GFS)の海面更正気圧グリッドを取得してpressure_grid.jsonを出力。
 
-- 既存のpressure_grid.jsonが50分以内ならスキップ(15分毎のcronから呼ばれても1時間毎相当)
+- 既存のpressure_grid.jsonが170分以内ならスキップ(3時間毎相当)。Open-Meteo無料枠(1日1万コール、地点数で加算)を超えないよう
+  2026-08-18 に 1.25°/毎時/hourly24値 → 1.5°/3時間毎/current のみ に軽量化(1218地点×24/時 → 875地点×1/3時間)
 - ブラウザから直接Open-Meteoを叩かずに済むよう、statusブランチ経由で配信する
 """
 import json
 import os
 import time
 import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 
 JST = timezone(timedelta(hours=9))
 OUT = 'pressure_grid.json'
-LAT0, LAT1, LON0, LON1, STEP = 16.0, 52.0, 112.0, 164.0, 1.25
+LAT0, LAT1, LON0, LON1, STEP = 16.0, 52.0, 112.0, 164.0, 1.5
 
 
 def main():
@@ -21,7 +23,7 @@ def main():
         try:
             prev = json.load(open(OUT))
             age = time.time() - prev.get('fetchedAtUnix', 0)
-            if age < 50 * 60:
+            if age < 170 * 60:
                 print(f'skip (age {int(age/60)}min)')
                 return
         except Exception:
@@ -50,7 +52,7 @@ def main():
         url = ('https://api.open-meteo.com/v1/gfs?latitude='
                + ','.join(str(x) for x in lats[s:e])
                + '&longitude=' + ','.join(str(x) for x in lons[s:e])
-               + '&hourly=pressure_msl&forecast_days=1&timeformat=unixtime')
+               + '&current=pressure_msl&timeformat=unixtime')
         arr = None
         for tryi in range(4):
             try:
@@ -58,8 +60,12 @@ def main():
                 with urllib.request.urlopen(req, timeout=35) as r:
                     d = json.load(r)
                 arr = d if isinstance(d, list) else [d]
-                if arr and arr[0].get('hourly'):
+                if arr and arr[0].get('current'):
                     break
+                arr = None
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    raise SystemExit('Open-Meteo 429(1日の上限超過)。前回ファイルを維持')
                 arr = None
             except Exception:
                 arr = None
@@ -73,15 +79,11 @@ def main():
     t_used = None
     P = [[None] * n_lo for _ in range(n_la)]
     for k in range(n):
-        h = results[k].get('hourly') if results[k] else None
-        if not h:
+        c = results[k].get('current') if results[k] else None
+        if not c:
             continue
-        ti = 0
-        for t in range(len(h['time'])):
-            if h['time'][t] <= now:
-                ti = t
-        t_used = h['time'][ti]
-        v = h['pressure_msl'][ti]
+        t_used = c.get('time')
+        v = c.get('pressure_msl')
         P[k // n_lo][k % n_lo] = round(v, 1) if v is not None else None
 
     out = {'fetchedAt': datetime.now(JST).isoformat(timespec='seconds'),

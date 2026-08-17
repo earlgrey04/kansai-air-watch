@@ -158,7 +158,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63.5-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63.6-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -1760,7 +1760,7 @@ async function loadPressureFromStatus(){
       if(!r.ok) continue;
       const d=await r.json();
       if(!d||!d.P||!d.nLa) continue;
-      if(Date.now()/1000 - (d.fetchedAtUnix||0) > 4*3600) continue;  // 4時間超は鮮度切れ
+      if(Date.now()/1000 - (d.fetchedAtUnix||0) > 12*3600) continue;  // 12時間超は鮮度切れ(サーバー側は3時間毎更新)
       const gLat=[], gLon=[];
       for(let i=0;i<d.nLa;i++) gLat.push(d.lat0+d.step*i);
       for(let j=0;j<d.nLo;j++) gLon.push(d.lon0+d.step*j);
