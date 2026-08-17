@@ -112,7 +112,7 @@
   #camPanel .x { position:absolute; right:8px; top:6px; background:none; border:none; color:#cfe0f5; font-size:18px; cursor:pointer; padding:0 4px; }
   #camPanel .zm { position:absolute; right:32px; top:8px; background:none; border:none; color:#cfe0f5; font-size:14px; cursor:pointer; padding:0 4px; }
   #camPanel .big { position:absolute; right:58px; top:8px; background:none; border:none; color:#cfe0f5; font-size:14px; cursor:pointer; padding:0 4px; }
-  #camPanel.big { width:min(1100px, 78vw); bottom:44px; }
+  #camPanel.big { width:min(1100px, 78vw, calc((100vh - 250px) * 1.78)); bottom:44px; } /* 上のモードバーに被らない高さに収める */
   #camPanel.big #camNote { display:none; }
   #camPanel .ttl { padding-right:80px; }
   #camMedia { margin:6px 0 4px; background:#000; border-radius:6px; overflow:hidden; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; }
@@ -146,7 +146,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63.3-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v63.4-livecam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
