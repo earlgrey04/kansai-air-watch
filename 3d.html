@@ -103,10 +103,15 @@
     margin-right:6px; vertical-align:middle; }
   #tsuLegend3 .hd { font-size:10.5px; color:#9fb8d6; }
   /* 在来線モードの運行情報一覧パネル */
-  #zaiPanel, #hwyPanel { display:none; position:absolute; right:10px; bottom:44px; z-index:10;
+  #zaiPanel, #hwyPanel, #cryptoPanel { display:none; position:absolute; right:10px; bottom:44px; z-index:10;
     background:rgba(10,30,50,.88); color:#dfeaff; border:1px solid #29496b; border-radius:10px;
     padding:8px 12px; font:11px/1.55 system-ui,sans-serif; width:290px; }
-  #zaiPanel .hd, #hwyPanel .hd { font-size:10.5px; color:#9fb8d6; }
+  #cryptoPanel { width:320px; }
+  #cryptoPanel .zai-row b { word-break:break-word; }
+  #cryptoList { overflow-x:hidden; }
+  #cryptoList { max-height:52vh; overflow-y:auto; margin:4px 0; }
+  #zaiPanel .hd, #hwyPanel .hd, #cryptoPanel .hd { font-size:10.5px; color:#9fb8d6; }
+  #cryptoPanel a { color:#8fc1ee; text-decoration:none; }
   #zaiPanel a, #hwyPanel a { color:#8fc1ee; text-decoration:none; }
   #zaiList, #hwyList { max-height:38vh; overflow-y:auto; margin:4px 0; }
   .zai-row { padding:3px 4px; border-radius:6px; cursor:pointer; }
@@ -148,7 +153,7 @@
       line-height: 1.5; padding: 5px 8px; }
     #tsuLegend3 { left: 6px; bottom: 300px; max-width: 44vw; font-size: 9.5px;
       line-height: 1.5; padding: 5px 8px; }
-    #zaiPanel, #hwyPanel { right: 6px; bottom: 96px; width: 54vw; font-size: 10px; padding: 6px 9px; }
+    #zaiPanel, #hwyPanel, #cryptoPanel { right: 6px; width:54vw; bottom: 96px; width: 54vw; font-size: 10px; padding: 6px 9px; }
     #zaiList, #hwyList { max-height: 24vh; }
     #pressNote { left: 6px; bottom: 4px; font-size: 9px; max-width: 60vw; }
     #warnLegend3 .chip, #tsuLegend3 .chip, #shinkLegend .chip { width: 13px; }
@@ -158,7 +163,7 @@
 </head>
 <body>
 <div id="cesiumContainer"></div>
-<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v64-worldcam</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
+<div id="hud">🗾 <b>日本ライブマップ</b> <span style="font-size:10px;color:#5f7fa6">v65-cryptonodes</span> <span id="mode">LIVE</span><br><span class="cnt" id="cnt">–</span><span id="cntUnit"> 機</span> <span id="hudNote" style="font-size:9.5px;color:#5f7fa6">航空機の受信は関西中心</span><br><span id="upd" style="font-size:11px;color:#9fb8d6"></span></div>
 <div id="bar">
   <button id="bLive" class="on" onclick="setLive()">🔴 ライブ</button>
   <button onclick="setReplay(1)">🕑 1時間</button>
@@ -181,6 +186,7 @@
   <button id="bTsu" onclick="toggleTsunami()">🌊 津波</button>
   <button id="bPress" onclick="togglePressure()">🌐 気圧</button>
   <button id="bTy" onclick="setTyphoon()">🌀 台風</button>
+  <button id="bCrypto" onclick="setCrypto()">₿ ノード</button>
   <button id="bCable" onclick="setCables()">🔌 海底ケーブル</button>
   <button id="bWind" onclick="setWind()">🌬️ 上空の風</button>
   <button onclick="setSatellites()">🛰️ 衛星</button>
@@ -214,6 +220,13 @@
   <a href="https://www.jrkyushu.co.jp/trains/info/" target="_blank" rel="noopener">JR九州</a></span>
 </div>
 <div id="pressNote">気圧配置 読み込み中…</div>
+<div id="cryptoPanel">
+  <span class="hd">₿ ノード分布 <span style="color:#5f7fa6">世界のブロックチェーン基盤</span></span>
+  <div id="cryptoList"></div>
+  <span class="hd">出典: <a href="https://btcnodes.io/" target="_blank" rel="noopener">btcnodes.io</a>（Bitcoin）・
+  <a href="https://nodewatch.io/" target="_blank" rel="noopener">Nodewatch / ChainSafe</a>（Ethereum）／
+  位置はIPからのGeoIP推定。Tor・I2P接続のノードは座標を持たないため地図上には出ません</span>
+</div>
 <div id="hwyPanel">
   <span class="hd">🛣️ 道路交通情報 <span id="hwyUpd"></span></span>
   <div id="hwyList"></div>
@@ -272,7 +285,8 @@ const HDRS = { apikey: KEY, Authorization: "Bearer " + KEY };
 const MODEL_URL = "https://cesium.com/downloads/cesiumjs/releases/1.118/Apps/SampleData/models/CesiumAir/Cesium_Air.glb";
 const FT2M = 0.3048;
 const setErr = m => { const e=document.getElementById('err'); if(!m){e.style.display='none';return;} e.style.display='block'; e.textContent=m; };
-const setModeLbl = t => { document.getElementById('mode').textContent=t; const u=document.getElementById('cntUnit'); if(u)u.style.display=(t==='LIVE')?'':'none'; };
+const setModeLbl = t => { document.getElementById('mode').textContent=t; const u=document.getElementById('cntUnit'); if(u)u.style.display=(t==='LIVE')?'':'none';
+  const n=document.getElementById('hudNote'); if(n)n.style.display=(t==='LIVE')?'':'none'; };
 window.onerror = (m,src,l,c,e)=>{ try{ setErr("JSエラー: "+m+" @"+l); }catch(_){} };
 
 Cesium.Ion.defaultAccessToken = "";
@@ -478,6 +492,7 @@ function clearNewModes(){
   if(hwyTimer){ try{ clearInterval(hwyTimer); }catch(_){} hwyTimer=null; }
   { const hp=document.getElementById('hwyPanel'); if(hp) hp.style.display='none'; }
   try{ camOff(); }catch(_){}
+  try{ cryptoOff(); }catch(_){}
   if(zaiShinkSrc){ try{ viewer.dataSources.remove(zaiShinkSrc,true); }catch(_){} zaiShinkSrc=null; }
   { const zp=document.getElementById('zaiPanel'); if(zp) zp.style.display='none'; }
   shinkLineEnts=null; shinkLinesData=null; shinkSectionEnts=[];
@@ -3242,6 +3257,140 @@ async function setCameras(){
   catch(e){ setErr('ライブカメラ一覧の取得失敗: '+(e&&e.message||e)); }
 }
 
+// ===== ₿ ノード分布（Bitcoin フルノード / Ethereum ビーコンノード）=====
+// データ: statusブランチ crypto_nodes.json（scripts/fetch_crypto_nodes.py が6時間毎に生成）
+//   BTC=btcnodes.io(旧bitnodes) / ETH=nodewatch.chainsafe.io。座標は小数2桁で集約済み
+var cryptoSrc=null, cryptoData=null, cryptoFilter=null, cryptoMode=false;
+const CRYPTO_URLS=[
+  'https://raw.githubusercontent.com/earlgrey04/kansai-air-watch/status/crypto_nodes.json',
+  'crypto_nodes.json',
+];
+const CRY_COL={ btc:'#d95926', eth:'#9085e9' };
+const CRY_LBL={ btc:'₿ Bitcoin', eth:'Ξ Ethereum' };
+function cryptoOff(){
+  cryptoMode=false;
+  if(cryptoSrc){ try{ viewer.dataSources.remove(cryptoSrc,true); }catch(_){} cryptoSrc=null; }
+  const p=document.getElementById('cryptoPanel'); if(p) p.style.display='none';
+}
+async function cryptoLoad(){
+  if(cryptoData) return cryptoData;
+  for(const u of CRYPTO_URLS){
+    try{
+      const r=await fetch(u+(u.startsWith('http')?('?t='+Math.floor(Date.now()/600000)):''),{cache:'no-store'});
+      if(!r.ok) continue;
+      const d=await r.json();
+      if(d&&d.btc&&d.btc.pts){ cryptoData=d; return d; }
+    }catch(_){}
+  }
+  throw new Error('ノード分布データの取得失敗');
+}
+function cryptoBuild(){
+  const d=cryptoData; if(!d) return;
+  if(!cryptoSrc){ cryptoSrc=new Cesium.CustomDataSource('crypto'); viewer.dataSources.add(cryptoSrc); }
+  cryptoSrc.entities.suspendEvents();
+  cryptoSrc.entities.removeAll();
+  let shown=0;
+  for(const kind of ['btc','eth']){
+    if(cryptoFilter && cryptoFilter!==kind) continue;
+    const set=d[kind]; if(!set||!set.pts) continue;
+    const col=Cesium.Color.fromCssColorString(CRY_COL[kind]);
+    for(const p of set.pts){
+      const la=p[0], lo=p[1], n=p[2]||1, ci=p[3];
+      const client=(kind==='eth'&&set.clients&&ci!=null)?set.clients[ci]:null;
+      shown+=n;
+      cryptoSrc.entities.add({
+        position:Cesium.Cartesian3.fromDegrees(lo,la,30000),
+        point:{ pixelSize:Math.min(16, 4+Math.sqrt(n)*2.4), color:col.withAlpha(0.92),
+                outlineColor:Cesium.Color.BLACK, outlineWidth:0.6,
+                translucencyByDistance:new Cesium.NearFarScalar(1.0e6, 1.0, 3.0e7, 0.55) },
+        description:`<table><tr><td>ネットワーク</td><td><b>${CRY_LBL[kind]}</b></td></tr>`+
+          `<tr><td>この地点のノード数</td><td><b>${n}</b></td></tr>`+
+          (client?`<tr><td>クライアント</td><td>${client}</td></tr>`:'')+
+          `<tr><td>座標</td><td>${la.toFixed(2)}, ${lo.toFixed(2)}</td></tr></table>`+
+          `<p style="font-size:11px;color:#9fb8d6">位置はIPのGeoIP推定（データセンター単位でまとまる傾向）。出典: ${kind==='btc'?d.btc.src:d.eth.src}</p>`,
+      });
+    }
+  }
+  cryptoSrc.entities.resumeEvents();
+  const b=d.btc||{}, e=d.eth||{};
+  document.getElementById('cnt').textContent=shown.toLocaleString()+' ノード';
+  document.getElementById('upd').innerHTML=
+    `₿ Bitcoin 到達可能ノード <b>${(b.total||0).toLocaleString()}</b>（うち位置が判るIPv4/v6 ${(b.geo||0).toLocaleString()}・Tor/I2P等は座標なし）<br>`+
+    `Ξ Ethereum ビーコンノード <b>${(e.total||0).toLocaleString()}</b>（同期済 ${e.synced_pct||0}%）<br>`+
+    `<span style="color:#5f7fa6">点=約1km四方に集約したノード、大きさ=そこにある数 ／ 取得 ${d.gen}</span>`;
+  cryptoPanel();
+  try{ viewer.scene.requestRender(); }catch(_){}
+}
+function cryptoRow(name, val, max, col){
+  const w=Math.max(2,Math.round(100*val/(max||1)));
+  return `<div class="zai-row m-noclick"><b>${name}</b> <span style="float:right">${val.toLocaleString()}</span>`+
+    `<div style="height:4px;border-radius:2px;background:${col};width:${w}%;margin-top:2px"></div></div>`;
+}
+function cryptoPanel(){
+  const d=cryptoData; const el=document.getElementById('cryptoList'); if(!el||!d) return;
+  const show=k=>!cryptoFilter||cryptoFilter===k;
+  let h='';
+  if(show('btc')&&d.btc){
+    const cs=d.btc.countries||[], max=cs.length?cs[0][2]:1;
+    h+=`<div class="hd" style="color:${CRY_COL.btc}">₿ Bitcoin ノードの国別（位置が判る ${(d.btc.geo||0).toLocaleString()} 台）</div>`;
+    h+=cs.slice(0,8).map(c=>cryptoRow(c[0],c[2],max,CRY_COL.btc)).join('');
+    if(d.btc.networks&&d.btc.networks.length){
+      h+=`<div class="hd" style="margin-top:6px">接続方式（全 ${(d.btc.total||0).toLocaleString()} 台）</div>`;
+      h+=d.btc.networks.map(n=>`<div class="zai-row m-noclick"><b>${n[0]}</b><span style="float:right">${n[1].toLocaleString()}（${n[2]}%）</span></div>`).join('');
+    }
+    if(d.btc.orgs&&d.btc.orgs.length){
+      h+=`<div class="hd" style="margin-top:6px">ホスティング事業者 上位</div>`;
+      const m=d.btc.orgs[0][1];
+      h+=d.btc.orgs.slice(0,5).map(o=>cryptoRow(o[0],o[1],m,CRY_COL.btc)).join('');
+    }
+  }
+  if(show('eth')&&d.eth){
+    const cs=d.eth.countries||[], max=cs.length?cs[0][2]:1;
+    h+=`<div class="hd" style="margin-top:8px;color:${CRY_COL.eth}">Ξ Ethereum ビーコンノードの国別</div>`;
+    h+=cs.slice(0,8).map(c=>cryptoRow(c[0],c[2],max,CRY_COL.eth)).join('');
+    if(d.eth.client_counts&&d.eth.client_counts.length){
+      const m=d.eth.client_counts[0][1];
+      h+=`<div class="hd" style="margin-top:6px">クライアント実装</div>`;
+      h+=d.eth.client_counts.slice(0,6).map(c=>cryptoRow(c[0],c[1],m,CRY_COL.eth)).join('');
+    }
+    if(d.eth.networks&&d.eth.networks.length){
+      const m=d.eth.networks[0][1];
+      h+=`<div class="hd" style="margin-top:6px">回線の種別</div>`;
+      h+=d.eth.networks.slice(0,5).map(c=>cryptoRow(c[0],c[1],m,CRY_COL.eth)).join('');
+    }
+  }
+  el.innerHTML=h;
+  const p=document.getElementById('cryptoPanel'); if(p) p.style.display='block';
+}
+function cryptoSetFilter(k){
+  cryptoFilter=(cryptoFilter===k)?null:k;
+  document.querySelectorAll('#modebar button[data-c]').forEach(b=>b.classList.toggle('on', b.dataset.c===(cryptoFilter||'all')));
+  cryptoBuild();
+}
+async function setCrypto(){
+  { const btn=document.getElementById('bCrypto'); if(btn && btn.classList.contains('on')){ setLive(); return; } }
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  weatherOff(); quakesOff(); lightningOff(); volcanoesOff();
+  document.querySelectorAll('#bar button').forEach(b=>b.classList.remove('on'));
+  satPhoto='esri'; refreshPhotoButtons();   // 世界表示なので実写ベース（暗色地図だと大陸が見えない）
+  const btn=document.getElementById('bCrypto'); if(btn)btn.classList.add('on');
+  setModeLbl('ノード分布'); clearStarlink(); setBasemap('dark');
+  viewer.clock.shouldAnimate=false;
+  viewer.entities.removeAll(); plateVecEnts=[];
+  cryptoMode=true;
+  const mb=document.getElementById('modebar');
+  if(mb){
+    mb.innerHTML='<button data-c="all" class="on" onclick="cryptoSetFilter(null)">両方</button>'+
+      `<button data-c="btc" onclick="cryptoSetFilter('btc')">₿ Bitcoin</button>`+
+      `<button data-c="eth" onclick="cryptoSetFilter('eth')">Ξ Ethereum</button>`;
+    mb.style.display='flex';
+  }
+  setErr('ノード分布データを読み込み中…');
+  viewer.camera.flyTo({ destination:Cesium.Cartesian3.fromDegrees(-25,38,2.6e7), duration:1.6 });
+  try{ await cryptoLoad(); if(!cryptoMode) return; cryptoBuild(); setErr(null); }
+  catch(e){ setErr('ノード分布の取得失敗: '+(e&&e.message||e)); }
+}
+
 // カメラをコピー（cキー）＝今の視点コードをクリップボードへ。動画に完全一致で反映できる
 window.addEventListener('keydown', function(e){
   if((e.key==='c'||e.key==='C') && !e.ctrlKey && !e.metaKey){
@@ -3261,6 +3410,9 @@ setLive();
     const q=new URLSearchParams(location.search); const m=q.get('mode')||(location.hash||'').replace('#','');
     if(m==='cam'||m==='camera'||m==='livecam'){
       setTimeout(()=>{ setCameras(); const k=q.get('k'); if(k&&CAM_KIND[k]) setTimeout(()=>camSetFilter(k),1500); }, 800);
+    }
+    if(m==='crypto'||m==='node'||m==='nodes'){
+      setTimeout(()=>{ setCrypto(); const k=q.get('k'); if(k==='btc'||k==='eth') setTimeout(()=>cryptoSetFilter(k),1800); }, 800);
     }
   }catch(_){}
 })();

@@ -42,6 +42,12 @@ jobs:
             "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/status/highway_events.json" \
             -o highway_events.json || true
           timeout 150 python3 scripts/fetch_highway_events.py || true
+      - name: fetch crypto node distribution (every 6h, skip if fresh)
+        run: |
+          curl -sf --max-time 20 \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/status/crypto_nodes.json" \
+            -o crypto_nodes.json || true
+          timeout 200 python3 scripts/fetch_crypto_nodes.py || true
       - name: fetch youtube live cameras (every 6h, skip if fresh)
         run: |
           curl -sf --max-time 20 \
@@ -64,6 +70,7 @@ jobs:
           [ -s highway_events.json ] && cp highway_events.json /tmp/out/ || true
           [ -s cameras_yt.json ] && cp cameras_yt.json /tmp/out/ || true
           [ -s cameras_status.json ] && cp cameras_status.json /tmp/out/ || true
+          [ -s crypto_nodes.json ] && cp crypto_nodes.json /tmp/out/ || true
           cd /tmp/out
           git init -q -b status
           git config user.name "github-actions[bot]"
