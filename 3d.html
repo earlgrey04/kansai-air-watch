@@ -655,11 +655,20 @@ function upsertLive(a){
   }
   planes[a.hex]._seen=Date.now();
 }
+const LIVE_LITE="https://x402-adsb.x402-adsb-worker.workers.dev/live-lite"; // Pi直接push(鮮度~5秒)。Supabase egress対策 2026-08-31
 async function pollLive(){
   try{
-    const r=await fetch(`${SUPA}/rest/v1/feed_snapshot?select=data&limit=1`,{headers:HDRS});
-    const j=await r.json();
-    const list=(j&&j[0]&&j[0].data&&j[0].data.aircraft)||[];
+    let snap=null;
+    try{
+      const rw=await fetch(LIVE_LITE,{signal:AbortSignal.timeout(4000)});
+      if(rw.ok) snap=await rw.json();
+    }catch(e){/* Worker不調時はSupabaseへフォールバック */}
+    if(!snap){
+      const r=await fetch(`${SUPA}/rest/v1/feed_snapshot?select=data&limit=1`,{headers:HDRS});
+      const j=await r.json();
+      snap=(j&&j[0]&&j[0].data)||null;
+    }
+    const list=(snap&&snap.aircraft)||[];
     let n=0; for(const a of list){ if(a.lat!=null&&a.lon!=null){ upsertLive(a); n++; } }
     const now=Date.now();
     for(const hex of Object.keys(planes)){ if(now-planes[hex]._seen>30000){ viewer.entities.remove(planes[hex].ent); viewer.entities.remove(planes[hex].line); delete planes[hex]; } }
