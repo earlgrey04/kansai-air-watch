@@ -1,0 +1,87 @@
+{
+ "updated": "2026-09-27T07:48:31+09:00",
+ "lines": {
+  "hokkaido": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR北海道",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  },
+  "tohoku": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  },
+  "yamagata": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  },
+  "akita": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  },
+  "joetsu": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  },
+  "hokuriku": {
+   "status": "normal",
+   "text": "JR東日本区間: 平常運転 / JR西日本区間: 平常運転",
+   "source": "JR東日本・JR西日本",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  },
+  "tokaido": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東海",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  },
+  "sanyo": {
+   "status": "info",
+   "text": "お知らせ(地震)",
+   "sections": [
+    {
+     "from": "新大阪",
+     "to": "博多",
+     "status": "info"
+    }
+   ],
+   "detail": "【お知らせ】 【山陽新幹線】地震　行き先変更 原因: 地震 区間: 新大阪〜博多(下り)",
+   "source": "JR西日本",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "お知らせあり"
+  },
+  "kyushu": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR九州",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  },
+  "nishikyushu": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR九州",
+   "asOf": "2026-09-27T07:48:31+09:00",
+   "label": "平常運転"
+  }
+ },
+ "tomorrow": {
+  "items": []
+ },
+ "errors": []
+}
