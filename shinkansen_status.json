@@ -1,0 +1,93 @@
+{
+ "updated": "2026-10-04T02:03:09+09:00",
+ "lines": {
+  "hokkaido": {
+   "status": "delay",
+   "text": "現在、遅れに関する情報はありません。",
+   "sections": [],
+   "detail": "現在、遅れに関する情報はありません。",
+   "source": "JR北海道",
+   "asOf": "2026-10-04T02:03:09+09:00",
+   "label": "遅れあり"
+  },
+  "tohoku": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "asOf": "2026-10-04T01:48:06+09:00",
+   "label": "平常運転"
+  },
+  "yamagata": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "asOf": "2026-10-04T01:48:06+09:00",
+   "label": "平常運転"
+  },
+  "akita": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "asOf": "2026-10-04T01:48:06+09:00",
+   "label": "平常運転"
+  },
+  "joetsu": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東日本",
+   "asOf": "2026-10-04T01:48:06+09:00",
+   "label": "平常運転"
+  },
+  "hokuriku": {
+   "status": "normal",
+   "text": "JR西日本区間: 平常運転",
+   "source": "JR東日本・JR西日本",
+   "asOf": "2026-10-04T02:03:09+09:00",
+   "label": "平常運転"
+  },
+  "tokaido": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR東海",
+   "asOf": "2026-10-03T23:48:09+09:00",
+   "label": "平常運転"
+  },
+  "sanyo": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR西日本",
+   "asOf": "2026-10-04T02:03:09+09:00",
+   "label": "平常運転"
+  },
+  "kyushu": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR九州",
+   "asOf": "2026-10-04T02:03:09+09:00",
+   "label": "平常運転"
+  },
+  "nishikyushu": {
+   "status": "normal",
+   "text": "平常運転",
+   "source": "JR九州",
+   "asOf": "2026-10-04T02:03:09+09:00",
+   "label": "平常運転"
+  }
+ },
+ "tomorrow": {
+  "items": [
+   {
+    "name": "北海道新幹線（10/4）",
+    "line": "hokkaido",
+    "status": "delay",
+    "text": "現在、遅れに関する情報はありません。",
+    "source": "JR北海道"
+   }
+  ]
+ },
+ "errors": [
+  "JR東日本: ValueError: JR東: 路線ステータスをパースできず",
+  "jre-odpt: RuntimeError: no ODPT_CHALLENGE_TOKEN",
+  "JR東海: JSONDecodeError: Expecting value: line 1 column 1 (char 0)"
+ ]
+}
